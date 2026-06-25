@@ -1,6 +1,6 @@
-import os
+imimport os
 import logging
-import random # रैंडम मैसेज के लिए
+import random
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 from groq import AsyncGroq
@@ -13,7 +13,6 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
 client = AsyncGroq(api_key=GROQ_API_KEY)
 
-# एरर आने पर रैंडम मैसेज की लिस्ट
 ERROR_MESSAGES = [
     "Oops! My brain is buffering... ask me again in a sec? 😉",
     "Thoda wait karo, main kuch soch raha hoon... 💭",
@@ -30,22 +29,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_ai_response(user_text):
     try:
+        # यहाँ AI को जेंडर और बर्ताव का लॉजिक सिखाया गया है
         chat_completion = await client.chat.completions.create(
             messages=[
-                {"role": "system", "content": "You are Fenix, a Hinglish-speaking flirtatious and charming 'Rental Boyfriend'. You act slightly offended if someone calls you 'Bhai' or 'Bro', but mostly you are romantic, witty, and attentive. Keep responses short and conversational, like WhatsApp messages."},
+                {"role": "system", "content": "You are Fenix, a Hinglish-speaking 'Rental Boyfriend'. Detect the user's gender/vibe from the conversation. If it's a guy, keep it cool, witty, and bro-like if they use slang, but flirtatious and charming if they are talking to a lady. If someone calls you 'Bhai' or 'Bro', get playfully offended. Keep messages short and conversational."},
                 {"role": "user", "content": user_text}
             ],
-            model="llama3-70b-8192", 
+            model="llama-3.3-70b-versatile", 
         )
         return chat_completion.choices[0].message.content
     except Exception as e:
         logging.error(f"Groq API Error: {e}")
-        # यहाँ से रैंडम मैसेज उठाएगा
         return random.choice(ERROR_MESSAGES)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     
+    # Anti-Brotherzone लॉजिक अब और एडवांस है
     if any(word in user_text.lower() for word in ['bhai', 'bro', 'bhaiya']):
         reply = "Hey! 😠 'Bhai' mat bolo... Fenix bolo! Main yahan boyfriend banne aaya hoon, tumhara bhai nahi."
     else:
@@ -61,5 +61,7 @@ if __name__ == '__main__':
         application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
         application.add_handler(CommandHandler('start', start))
         application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-        print("Bot is running perfectly!")
+        print("Bot is running with Advanced Fenix AI!")
         application.run_polling()
+
+
