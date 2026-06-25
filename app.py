@@ -3,10 +3,10 @@ import logging
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
-# लॉगिंग सेट करना ताकि रेंडर के 'Logs' में आप देख सकें कि बोट क्या कर रहा है
+# लॉगिंग सेट करना
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# टोकन एनवायरमेंट वेरिएबल से आएगा
+# टोकन एनवायरमेंट वेरिएबल से लेना
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -26,13 +26,11 @@ if __name__ == '__main__':
     if not TOKEN:
         print("Error: TELEGRAM_BOT_TOKEN not found!")
     else:
+        # लेटेस्ट वर्शन के हिसाब से एप्लीकेशन बिल्डर
         application = ApplicationBuilder().token(TOKEN).build()
         
-        start_handler = CommandHandler('start', start)
-        msg_handler = MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message)
+        application.add_handler(CommandHandler('start', start))
+        application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
         
-        application.add_handler(start_handler)
-        application.add_handler(msg_handler)
-        
-        # रेंडर पर पोलिंग मोड में बोट चलाना
+        print("Bot is running...")
         application.run_polling()
