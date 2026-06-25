@@ -1,4 +1,4 @@
-imimport os
+import os
 import logging
 import random
 from telegram import Update
