@@ -1,3 +1,4 @@
+python-dotenv
+elevenlabs
 python-telegram-bot
 groq
-elevenlabs
