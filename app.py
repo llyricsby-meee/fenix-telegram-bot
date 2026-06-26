@@ -5,7 +5,7 @@ from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filte
 from groq import AsyncGroq
 from elevenlabs.client import ElevenLabs
 
-# Logging
+# Logging setup
 logging.basicConfig(level=logging.INFO)
 
 # API Setup
@@ -30,19 +30,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.lower()
     wants_voice = "voice" in user_text or "audio" in user_text
     
-    # 1. 'Bhai/Bro' Filter
+    # Typing indicator start
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
+    
+    # 'Bhai/Bro' Filter
     if any(word in user_text.split() for word in ['bhai', 'bro', 'bhaiya']):
         reply = "Hey! 😠 Fenix bolo, bhai nahi. Main tumhara boyfriend hoon!"
     else:
         reply = await get_ai_response(update.message.text)
     
-    # 2. Typing indicator
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
-    
     if wants_voice:
         try:
-            # ElevenLabs generation
-            audio_stream = eleven_client.generate(text=reply, voice="Brian", model="eleven_multilingual_v2")
+            # Voice recording indicator
+            await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='record_voice')
+            
+            # ElevenLabs new method (v1.0.0+)
+            audio_stream = eleven_client.text_to_speech.convert(
+                text=reply,
+                voice_id="Brian", # Yahan apni Voice ID daal sakte ho
+                model_id="eleven_multilingual_v2"
+            )
+            
             with open("reply.mp3", "wb") as f:
                 for chunk in audio_stream:
                     f.write(chunk)
@@ -51,7 +59,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if os.path.exists("reply.mp3"): os.remove("reply.mp3")
             
         except Exception as e:
-            # Fallback if voice fails
             logging.error(f"Voice Error: {e}")
             await context.bot.send_message(chat_id=update.effective_chat.id, text=f"{reply} \n(Voice mein chhota sa glitch aaya, par I love you! ❤️)")
     else:
@@ -59,6 +66,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=update.effective_chat.id, text=reply)
 
 if __name__ == '__main__':
-    application = ApplicationBuilder().token(os.environ.get("TELEGRAM_TOKEN")).build()
+    # Token check
+    token = os.environ.get("TELEGRAM_TOKEN")
+    application = ApplicationBuilder().token(token).build()
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     application.run_polling()
