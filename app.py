@@ -1,9 +1,13 @@
 import os
 import logging
+from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 from groq import AsyncGroq
 from elevenlabs.client import ElevenLabs
+
+# .env फाइल लोड करें
+load_dotenv()
 
 # Logging setup
 logging.basicConfig(level=logging.INFO)
@@ -11,6 +15,9 @@ logging.basicConfig(level=logging.INFO)
 # API Setup
 groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
 eleven_client = ElevenLabs(api_key=os.environ.get("ELEVENLABS_API_KEY"))
+
+# एनवायरमेंट वेरिएबल से Voice ID उठाएं
+VOICE_ID = os.environ.get("ELEVEN_LABS_VOICE_ID")
 
 async def get_ai_response(user_text):
     try:
@@ -44,10 +51,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Voice recording indicator
             await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='record_voice')
             
-            # ElevenLabs new method (v1.0.0+)
+            # ElevenLabs: अब VOICE_ID वेरिएबल का इस्तेमाल होगा
             audio_stream = eleven_client.text_to_speech.convert(
                 text=reply,
-                voice_id="Brian", # Yahan apni Voice ID daal sakte ho
+                voice_id=VOICE_ID, 
                 model_id="eleven_multilingual_v2"
             )
             
