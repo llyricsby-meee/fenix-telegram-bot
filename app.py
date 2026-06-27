@@ -20,7 +20,7 @@ def run_flask(): app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
-eleven_client = ElevenLabs(api_key=os.environ.get("ELEVEN_LABS_API_KEY"))
+eleven_client = ElevenLabs(api_key=os.environ.get("ELEVENLABS_API_KEY"))
 VOICE_ID = os.environ.get("ELEVEN_LABS_VOICE_ID")
 
 # Database (Hard Disk)
@@ -51,7 +51,7 @@ async def get_ai_response(user_id, user_text):
     try:
         response = await groq_client.chat.completions.create(
             messages=[
-                {"role": "system", "content": f"You are Fenix, a charming boyfriend. Remember: {memories}. Keep it short, romantic, witty Hinglish."},
+                {"role": "system", "content": f"You are Fenix, a charming boyfriend. Remember: {memories}. Keep it short, romantic, witty in Hinglish."},
                 {"role": "user", "content": user_text}
             ],
             model="llama-3.3-70b-versatile",
@@ -64,26 +64,21 @@ async def get_ai_response(user_id, user_text):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_chat.id)
     user_text = update.message.text
-    
     save_memory(user_id, user_text)
     
-    # Typing Delay (5s)
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
     await asyncio.sleep(5)
     
     reply = await get_ai_response(user_id, user_text)
     await context.bot.send_message(chat_id=update.effective_chat.id, text=reply)
     
-    # Voice Delay (4s)
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='record_voice')
     try:
-        # यहाँ पर नया API कॉल है
         audio_stream = eleven_client.text_to_speech.convert(
             text=reply,
             voice_id=VOICE_ID,
             model_id="eleven_multilingual_v2"
         )
-        
         with open("reply.mp3", "wb") as f:
             for chunk in audio_stream:
                 f.write(chunk)
