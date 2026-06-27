@@ -20,7 +20,7 @@ def run_flask(): app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
-eleven_client = ElevenLabs(api_key=os.environ.get("ELEVENLABS_API_KEY"))
+eleven_client = ElevenLabs(api_key=os.environ.get("ELEVEN_LABS_API_KEY"))
 VOICE_ID = os.environ.get("ELEVEN_LABS_VOICE_ID")
 
 # Database (Hard Disk)
@@ -58,7 +58,6 @@ async def get_ai_response(user_id, user_text):
         )
         return response.choices[0].message.content
     except Exception as e:
-        # एरर हैंडलिंग - स्मार्ट रिप्लाई
         logging.error(f"Groq API Error: {e}")
         return "Baby, main zara thoda busy hoon aur thoda confuse ho gaya hoon. Ek minute ruk jao, wapas aata hoon! ❤️"
 
@@ -78,13 +77,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Voice Delay (4s)
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='record_voice')
     try:
-        audio = eleven_client.generate(text=reply, voice=VOICE_ID, model="eleven_multilingual_v2")
+        # यहाँ पर नया API कॉल है
+        audio_stream = eleven_client.text_to_speech.convert(
+            text=reply,
+            voice_id=VOICE_ID,
+            model_id="eleven_multilingual_v2"
+        )
+        
         with open("reply.mp3", "wb") as f:
-            for chunk in audio: f.write(chunk)
+            for chunk in audio_stream:
+                f.write(chunk)
+        
         await asyncio.sleep(4)
         await context.bot.send_voice(chat_id=update.effective_chat.id, voice=open("reply.mp3", "rb"))
     except Exception as e:
-        # एरर हैंडलिंग - वॉयस फेल होने पर
         logging.error(f"Voice Error: {e}")
         await context.bot.send_message(chat_id=update.effective_chat.id, text="Sorry baby, meri awaaz thodi latak gayi, agli baar pakka sunayunga! ✨")
 
