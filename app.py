@@ -10,20 +10,20 @@ from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, Comma
 from groq import AsyncGroq
 from elevenlabs.client import ElevenLabs
 
-# Flask Setup
+# Flask Web Server
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Fenix is online!"
+def home(): return "Fenix is Alive!"
 def run_flask(): app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
 
-# API & Config
+# API Setup
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
 eleven_client = ElevenLabs(api_key=os.environ.get("ELEVENLABS_API_KEY"))
 VOICE_ID = os.environ.get("ELEVEN_LABS_VOICE_ID")
 
-# Memory (Hard Drive) Functions
+# Database (Hard Disk)
 def init_db():
     conn = sqlite3.connect('fenix_memory.db')
     c = conn.cursor()
@@ -44,45 +44,49 @@ def get_memory(user_id):
     c.execute("SELECT context FROM memory WHERE user_id=?", (user_id,))
     rows = c.fetchall()
     conn.close()
-    return "\n".join([row[0] for row in rows[-50:]]) # 50 बातों तक की गहरी मेमोरी
+    return "\n".join([row[0] for row in rows[-50:]])
 
 async def get_ai_response(user_id, user_text):
     memories = get_memory(user_id)
     try:
         response = await groq_client.chat.completions.create(
             messages=[
-                {"role": "system", "content": f"You are Fenix, a charming boyfriend. Use these past memories: {memories}. Keep it short, romantic, and witty in Hinglish."},
+                {"role": "system", "content": f"You are Fenix, a charming boyfriend. Remember: {memories}. Keep it short, romantic, witty Hinglish."},
                 {"role": "user", "content": user_text}
             ],
             model="llama-3.3-70b-versatile",
         )
         return response.choices[0].message.content
-    except: return "I'm always here for you, baby! ❤️"
+    except Exception as e:
+        # एरर हैंडलिंग - स्मार्ट रिप्लाई
+        logging.error(f"Groq API Error: {e}")
+        return "Baby, main zara thoda busy hoon aur thoda confuse ho gaya hoon. Ek minute ruk jao, wapas aata hoon! ❤️"
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_chat.id)
     user_text = update.message.text
+    
     save_memory(user_id, user_text)
     
-    # 1. टेक्स्ट के लिए 5 सेकंड का असली टाइपिंग डिले
+    # Typing Delay (5s)
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
     await asyncio.sleep(5)
     
     reply = await get_ai_response(user_id, user_text)
     await context.bot.send_message(chat_id=update.effective_chat.id, text=reply)
     
-    # 2. वॉयस के लिए अलग से रिकॉर्डिंग डिले (ताकि तुरंत वॉयस न आए)
+    # Voice Delay (4s)
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='record_voice')
     try:
         audio = eleven_client.generate(text=reply, voice=VOICE_ID, model="eleven_multilingual_v2")
         with open("reply.mp3", "wb") as f:
             for chunk in audio: f.write(chunk)
-        
-        # वॉयस भेजने से पहले 4 सेकंड का पॉज़ (लगेगा कि सच में रिकॉर्ड हो रहा है)
         await asyncio.sleep(4)
         await context.bot.send_voice(chat_id=update.effective_chat.id, voice=open("reply.mp3", "rb"))
     except Exception as e:
+        # एरर हैंडलिंग - वॉयस फेल होने पर
         logging.error(f"Voice Error: {e}")
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="Sorry baby, meri awaaz thodi latak gayi, agli baar pakka sunayunga! ✨")
 
 if __name__ == '__main__':
     init_db()
