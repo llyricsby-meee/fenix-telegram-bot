@@ -5,7 +5,6 @@ from pyrogram import Client, filters, idle
 from groq import AsyncGroq
 from elevenlabs.client import ElevenLabs
 
-
 # --- CONFIG ---
 load_dotenv()
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -87,7 +86,7 @@ async def chat_handler(client, message):
     reply = await get_ai_response(str(message.chat.id), message.text)
     await message.reply(reply)
 
-# --- अंत में ये रिप्लेस करें ---
+# --- STARTUP ---
 if __name__ == '__main__':
     init_db()
     threading.Thread(target=run_flask).start()
