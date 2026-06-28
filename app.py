@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from pyrogram import Client, filters, idle
 from groq import AsyncGroq
 from elevenlabs.client import ElevenLabs
+import yt_dlp  # गाने डाउनलोड करने के लिए नया इम्पोर्ट
 
 # --- CONFIG ---
 load_dotenv()
@@ -65,13 +66,33 @@ async def play_music(client, message):
     query = " ".join(message.command[1:])
     if not query: return await message.reply("Baby, gaane ka naam batao! `/music [name]`")
     msg = await message.reply("🔎 Gaana dhoond raha hoon, thoda wait karo baby... ❤️")
-    await client.send_message("allsaverbot", query)
-    await asyncio.sleep(8)
-    async for m in client.get_chat_history("allsaverbot", limit=1):
-        if m.audio or m.video:
-            await client.copy_message(message.chat.id, "allsaverbot", m.id)
-            await msg.delete()
-        else: await msg.edit("Baby, gaana nahi mila, phir se try karo! ❤️")
+    
+    ydl_opts = {
+        'format': 'bestaudio[ext=m4a]/best',
+        'outtmpl': '/tmp/%(id)s.%(ext)s',
+        'default_search': 'ytsearch1',
+        'quiet': True,
+        'nocheckcertificate': True
+    }
+    
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(query, download=True)
+            if 'entries' in info:
+                info = info['entries'][0]
+            file_path = ydl.prepare_filename(info)
+            
+        await client.send_audio(
+            chat_id=message.chat.id, 
+            audio=file_path, 
+            title=info.get('title', 'Unknown Title'), 
+            performer=info.get('uploader', 'Fenix Bot')
+        )
+        await msg.delete()
+        if os.path.exists(file_path):
+            os.remove(file_path)
+    except Exception as e:
+        await msg.edit("Baby, gaana nahi mila ya download fail ho gaya! Phir se try karo! 💔")
 
 @bot.on_message(filters.command("voice"))
 async def voice_handler(client, message):
