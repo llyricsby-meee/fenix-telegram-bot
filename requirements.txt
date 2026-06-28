@@ -3,4 +3,5 @@ python-dotenv
 elevenlabs
 python-telegram-bot
 groq
+yt-dlp
 
