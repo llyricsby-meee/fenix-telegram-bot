@@ -47,7 +47,7 @@ def get_memory(user_id):
     conn.close()
     return "\n".join([row[0] for row in rows[-50:]])
 
-# Music Feature
+# Music Feature (Updated for better stability)
 async def play_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = " ".join(context.args)
     if not query:
@@ -62,7 +62,10 @@ async def play_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'noplaylist': True,
             'quiet': True,
             'outtmpl': '/tmp/song.mp3',
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+            'ignoreerrors': True,
+            'geo_bypass': True,
+            'nocheckcertificate': True
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(f"ytsearch:{query}", download=True)
@@ -76,7 +79,7 @@ async def play_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.delete()
     except Exception as e:
         logging.error(f"Music Error: {e}")
-        await update.message.reply_text("Baby, abhi YouTube se connection mein problem aa rahi hai. Thodi der mein try karna.")
+        await update.message.reply_text("Baby, YouTube abhi thoda tang kar raha hai. 5 minute baad phir se try karna!")
 
 # AI Response
 async def get_ai_response(user_id, user_text):
