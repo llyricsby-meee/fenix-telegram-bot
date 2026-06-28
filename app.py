@@ -3,13 +3,13 @@ import logging
 import threading
 import sqlite3
 import asyncio
-import yt_dlp
 from flask import Flask
 from dotenv import load_dotenv
 from telegram import Update, BotCommand
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, CommandHandler, filters
 from groq import AsyncGroq
 from elevenlabs.client import ElevenLabs
+from saavn_downloader.api import SaavnAPI
 
 # Flask Web Server
 app = Flask(__name__)
@@ -23,8 +23,9 @@ logging.basicConfig(level=logging.INFO)
 groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
 eleven_client = ElevenLabs(api_key=os.environ.get("ELEVENLABS_API_KEY"))
 VOICE_ID = os.environ.get("ELEVEN_LABS_VOICE_ID")
+saavn = SaavnAPI()
 
-# Database setup for Render
+# Database setup
 def init_db():
     conn = sqlite3.connect('/tmp/fenix_memory.db')
     c = conn.cursor()
@@ -47,39 +48,27 @@ def get_memory(user_id):
     conn.close()
     return "\n".join([row[0] for row in rows[-50:]])
 
-# Music Feature (Updated for better stability)
+# Music Feature (JioSaavn)
 async def play_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = " ".join(context.args)
     if not query:
         await update.message.reply_text("Baby, gaane ka naam toh batao! `/music [song name]`")
         return
 
-    status_msg = await update.message.reply_text(f"🔍 '{query}' dhoond rahi hoon, zara ruko...")
+    status_msg = await update.message.reply_text(f"🔍 '{query}' JioSaavn par dhoond rahi hoon...")
     
     try:
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'noplaylist': True,
-            'quiet': True,
-            'outtmpl': '/tmp/song.mp3',
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-            'ignoreerrors': True,
-            'geo_bypass': True,
-            'nocheckcertificate': True
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"ytsearch:{query}", download=True)
-            if 'entries' in info and len(info['entries']) > 0:
-                await update.message.reply_audio(audio=open("/tmp/song.mp3", 'rb'), title=info['entries'][0].get('title', 'Music'))
-            else:
-                await update.message.reply_text("Baby, gaana nahi mila. Phir se try karo!")
-        
-        if os.path.exists("/tmp/song.mp3"):
-            os.remove("/tmp/song.mp3")
-        await status_msg.delete()
+        results = saavn.search(query=query, limit=1)
+        if results:
+            song = results[0]
+            await update.message.reply_audio(audio=song['media_url'], title=song['song'])
+            await status_msg.delete()
+        else:
+            await update.message.reply_text("Baby, gaana nahi mila.")
+            await status_msg.delete()
     except Exception as e:
         logging.error(f"Music Error: {e}")
-        await update.message.reply_text("Baby, YouTube abhi thoda tang kar raha hai. 5 minute baad phir se try karna!")
+        await update.message.reply_text("Baby, abhi service busy hai. Thodi der mein try karna!")
 
 # AI Response
 async def get_ai_response(user_id, user_text):
@@ -104,27 +93,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
     await asyncio.sleep(2)
-    
     reply = await get_ai_response(user_id, user_text)
     await context.bot.send_message(chat_id=update.effective_chat.id, text=reply)
     
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='record_voice')
     try:
         audio_stream = eleven_client.text_to_speech.convert(
-            text=reply,
-            voice_id=VOICE_ID,
-            model_id="eleven_multilingual_v2"
+            text=reply, voice_id=VOICE_ID, model_id="eleven_multilingual_v2"
         )
         with open("/tmp/reply.mp3", "wb") as f:
             for chunk in audio_stream:
                 f.write(chunk)
-        
         await asyncio.sleep(2)
         await context.bot.send_voice(chat_id=update.effective_chat.id, voice=open("/tmp/reply.mp3", "rb"))
     except Exception as e:
         logging.error(f"Voice Error: {e}")
 
-# Telegram Menu Setup
 async def post_init(application):
     await application.bot.set_my_commands([
         BotCommand("hello", "Start conversation"),
@@ -143,3 +127,4 @@ if __name__ == '__main__':
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     
     application.run_polling()
+
