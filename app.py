@@ -24,7 +24,7 @@ groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
 eleven_client = ElevenLabs(api_key=os.environ.get("ELEVENLABS_API_KEY"))
 VOICE_ID = os.environ.get("ELEVEN_LABS_VOICE_ID")
 
-# Database (Hard Disk - using /tmp for Render compatibility)
+# Database setup for Render
 def init_db():
     conn = sqlite3.connect('/tmp/fenix_memory.db')
     c = conn.cursor()
@@ -47,7 +47,7 @@ def get_memory(user_id):
     conn.close()
     return "\n".join([row[0] for row in rows[-50:]])
 
-# --- MUSIC FEATURE ---
+# Music Feature
 async def play_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = " ".join(context.args)
     if not query:
@@ -61,19 +61,24 @@ async def play_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'format': 'bestaudio/best',
             'noplaylist': True,
             'quiet': True,
-            'outtmpl': '/tmp/song.mp3'
+            'outtmpl': '/tmp/song.mp3',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(f"ytsearch:{query}", download=True)
-            
-        await update.message.reply_audio(audio=open("/tmp/song.mp3", 'rb'), title=info['entries'][0]['title'])
-        os.remove("/tmp/song.mp3")
+            if 'entries' in info and len(info['entries']) > 0:
+                await update.message.reply_audio(audio=open("/tmp/song.mp3", 'rb'), title=info['entries'][0].get('title', 'Music'))
+            else:
+                await update.message.reply_text("Baby, gaana nahi mila. Phir se try karo!")
+        
+        if os.path.exists("/tmp/song.mp3"):
+            os.remove("/tmp/song.mp3")
         await status_msg.delete()
     except Exception as e:
         logging.error(f"Music Error: {e}")
-        await update.message.reply_text("Baby, गाना ढूँढने में थोड़ी दिक्कत हो गई। फिर से ट्राई करो!")
+        await update.message.reply_text("Baby, abhi YouTube se connection mein problem aa rahi hai. Thodi der mein try karna.")
 
-# AI Response & Chat
+# AI Response
 async def get_ai_response(user_id, user_text):
     memories = get_memory(user_id)
     try:
@@ -87,7 +92,7 @@ async def get_ai_response(user_id, user_text):
         return response.choices[0].message.content
     except Exception as e:
         logging.error(f"Groq API Error: {e}")
-        return "Baby, main zara thoda busy hoon aur thoda confuse ho gaya hoon. Ek minute ruk jao, wapas aata hoon! ❤️"
+        return "Baby, main zara thoda busy hoon. Ek minute ruk jao! ❤️"
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_chat.id)
@@ -115,14 +120,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_voice(chat_id=update.effective_chat.id, voice=open("/tmp/reply.mp3", "rb"))
     except Exception as e:
         logging.error(f"Voice Error: {e}")
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="Sorry baby, meri awaaz thodi latak gayi! ✨")
 
 # Telegram Menu Setup
 async def post_init(application):
     await application.bot.set_my_commands([
-        BotCommand("hello", "Start conversation with Fenix"),
-        BotCommand("music", "Play music from YouTube"),
-        BotCommand("voice", "Ask Fenix to reply in voice")
+        BotCommand("hello", "Start conversation"),
+        BotCommand("music", "Play music"),
+        BotCommand("voice", "Get voice reply")
     ])
 
 if __name__ == '__main__':
