@@ -145,7 +145,3 @@ if __name__ == '__main__':
     app_bot.add_error_handler(error_handler)
     
     app_bot.run_polling()
-
-
-
-Yehh teek hai ki bhiii ???
