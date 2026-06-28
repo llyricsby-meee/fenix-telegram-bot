@@ -3,13 +3,17 @@ import logging
 import threading
 import sqlite3
 import asyncio
+import requests
+import yt_dlp
 from flask import Flask
 from dotenv import load_dotenv
 from telegram import Update, BotCommand
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, CommandHandler, filters
 from groq import AsyncGroq
 from elevenlabs.client import ElevenLabs
-from saavn_downloader.api import SaavnAPI
+
+# --- CONFIG ---
+GENERATOR_URL = "https://link-generator-af3a.onrender.com"
 
 # Flask Web Server
 app = Flask(__name__)
@@ -23,7 +27,6 @@ logging.basicConfig(level=logging.INFO)
 groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
 eleven_client = ElevenLabs(api_key=os.environ.get("ELEVENLABS_API_KEY"))
 VOICE_ID = os.environ.get("ELEVEN_LABS_VOICE_ID")
-saavn = SaavnAPI()
 
 # Database setup
 def init_db():
@@ -48,29 +51,37 @@ def get_memory(user_id):
     conn.close()
     return "\n".join([row[0] for row in rows[-50:]])
 
-# Music Feature (JioSaavn)
+# Music Feature (NEW: Linked to your Generator)
 async def play_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = " ".join(context.args)
     if not query:
         await update.message.reply_text("Baby, gaane ka naam toh batao! `/music [song name]`")
         return
 
-    status_msg = await update.message.reply_text(f"🔍 '{query}' JioSaavn par dhoond rahi hoon...")
+    status_msg = await update.message.reply_text("🔗 Link generate ho raha hai...")
     
     try:
-        results = saavn.search(query=query, limit=1)
-        if results:
-            song = results[0]
-            await update.message.reply_audio(audio=song['media_url'], title=song['song'])
-            await status_msg.delete()
-        else:
-            await update.message.reply_text("Baby, gaana nahi mila.")
-            await status_msg.delete()
+        # 1. Generator से लिंक मांगो
+        resp = requests.get(f"{GENERATOR_URL}/generate", params={'q': query}).json()
+        youtube_url = resp['link']
+        
+        status_msg.edit_text("📥 Download ho raha hai...")
+        
+        # 2. Link को डाउनलोड करो
+        ydl_opts = {'format': 'bestaudio/best', 'outtmpl': '/tmp/song.mp3', 'noplaylist': True}
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([youtube_url])
+        
+        await update.message.reply_audio(audio=open("/tmp/song.mp3", 'rb'), title=query)
+        if os.path.exists("/tmp/song.mp3"): os.remove("/tmp/song.mp3")
+        await status_msg.delete()
+        
     except Exception as e:
         logging.error(f"Music Error: {e}")
-        await update.message.reply_text("Baby, abhi service busy hai. Thodi der mein try karna!")
+        await update.message.reply_text("Baby, gaana nahi mila ya service busy hai!")
+        if 'status_msg' in locals(): await status_msg.delete()
 
-# AI Response
+# AI Response (Same as before)
 async def get_ai_response(user_id, user_text):
     memories = get_memory(user_id)
     try:
@@ -87,6 +98,7 @@ async def get_ai_response(user_id, user_text):
         return "Baby, main zara thoda busy hoon. Ek minute ruk jao! ❤️"
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # (बाकी का कोड सेम है, इसे न बदलें)
     user_id = str(update.effective_chat.id)
     user_text = update.message.text
     save_memory(user_id, user_text)
@@ -127,4 +139,3 @@ if __name__ == '__main__':
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     
     application.run_polling()
-
