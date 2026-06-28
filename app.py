@@ -1,9 +1,10 @@
 import os, logging, sqlite3, asyncio, threading
 from flask import Flask
 from dotenv import load_dotenv
-from pyrogram import Client, filters
+from pyrogram import Client, filters, idle  # <--- ये रही वो लाइन
 from groq import AsyncGroq
 from elevenlabs.client import ElevenLabs
+
 
 # --- CONFIG ---
 load_dotenv()
@@ -100,4 +101,3 @@ if __name__ == '__main__':
     
     # 3. बोट को चालू रखने के लिए idle() का इस्तेमाल करें
     from pyrogram import idle
-    idle()
