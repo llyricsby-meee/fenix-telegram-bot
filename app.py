@@ -1,8 +1,12 @@
-import os, logging, sqlite3, asyncio, threading
+# सबसे पहले इवेंट लूप सेट करना जरूरी है (Pyrogram के लिए)
+import asyncio
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+
+import os, logging, sqlite3, threading
 from flask import Flask
 from dotenv import load_dotenv
-from pyrogram import Client, filters
-from pyrogram.sync import idle
+from pyrogram import Client, filters, idle
 from groq import AsyncGroq
 from elevenlabs.client import ElevenLabs
 
