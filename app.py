@@ -1,4 +1,4 @@
-import os, logging, sqlite3, asyncio, requests, yt_dlp, threading, traceback
+import os, logging, sqlite3, asyncio, requests, threading
 from flask import Flask
 from dotenv import load_dotenv
 from telegram import Update
@@ -10,19 +10,19 @@ from elevenlabs.client import ElevenLabs
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 # --- CONFIG ---
-GENERATOR_URL = "https://link-generator-l5eg.vercel.app"
 app = Flask(__name__)
 @app.route('/')
 def home(): return "Fenix is Alive!"
 def run_flask(): app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
 
-
 load_dotenv()
 groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
 eleven_client = ElevenLabs(api_key=os.environ.get("ELEVENLABS_API_KEY"))
 VOICE_ID = os.environ.get("ELEVEN_LABS_VOICE_ID")
+# तुम्हारा नया डाउनलोडर लिंक
+GATEWAY_URL = "https://fenix-downloader.onrender.com"
 
-# --- MEMORY ENGINE ---
+# --- MEMORY ENGINE (वही पुराना) ---
 def init_db():
     conn = sqlite3.connect('/tmp/fenix.db')
     c = conn.cursor()
@@ -57,24 +57,7 @@ def update_memory(user_id, text):
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logging.error(f"Error occurred: {context.error}")
     if update and update.effective_message:
-        user_id = str(update.effective_chat.id)
-        conn = sqlite3.connect('/tmp/fenix.db')
-        c = conn.cursor()
-        c.execute("UPDATE memory SET leaving_status = 1 WHERE user_id = ?", (user_id,))
-        conn.commit(); conn.close()
         await update.effective_message.reply_text("Baby, connection mein thodi dikkat aayi, main abhi theek ho raha hoon! ❤️")
-
-async def post_init(application: ContextTypes.DEFAULT_TYPE):
-    conn = sqlite3.connect('/tmp/fenix.db')
-    c = conn.cursor()
-    c.execute("SELECT user_id FROM memory WHERE leaving_status = 1")
-    users = c.fetchall()
-    for user in users:
-        try:
-            await application.bot.send_message(chat_id=user[0], text="✨ Fenix wapas aa gaya hai, main ab phir se aapke saath hoon! ❤️")
-            c.execute("UPDATE memory SET leaving_status = 0 WHERE user_id = ?", (user[0],))
-        except: continue
-    conn.commit(); conn.close()
 
 # --- FEATURES ---
 async def play_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -83,17 +66,17 @@ async def play_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not query:
             await update.message.reply_text("Baby, gaane ka naam toh batao! `/music [song name]`")
             return
-        msg = await update.message.reply_text("🔍 Dhoond raha hoon...")
-        resp = requests.get(f"{GENERATOR_URL}/generate", params={'q': query}, timeout=30).json()
-        url = resp['link']
-        msg.edit_text("📥 Download ho raha hai...")
-        ydl_opts = {'format': 'bestaudio/best', 'outtmpl': '/tmp/song.mp3'}
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
-        await update.message.reply_audio(audio=open("/tmp/song.mp3", 'rb'), title=query)
-        await msg.delete()
+        
+        # सीधे तुम्हारा नया डाउनलोडर लिंक यूज़ कर रहे हैं
+        download_link = f"{GATEWAY_URL}/download?url={query}"
+        
+        await update.message.reply_text(
+            f"✅ Gaana taiyaar hai baby!\n\n"
+            f"Yahan click karke download karo:\n{download_link}"
+        )
     except Exception as e:
         logging.error(f"Music Error: {e}")
-        await update.message.reply_text("Baby, gaana nahi mil raha, service busy hai!")
+        await update.message.reply_text("Baby, abhi server busy hai, thodi der mein try karna! ❤️")
 
 async def voice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -137,7 +120,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if __name__ == '__main__':
     init_db()
     threading.Thread(target=run_flask).start()
-    app_bot = ApplicationBuilder().token(os.environ.get("TELEGRAM_TOKEN")).post_init(post_init).build()
+    app_bot = ApplicationBuilder().token(os.environ.get("TELEGRAM_TOKEN")).build()
     
     app_bot.add_handler(CommandHandler("music", play_music))
     app_bot.add_handler(CommandHandler("voice", voice_command))
