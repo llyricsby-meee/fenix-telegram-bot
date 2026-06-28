@@ -6,7 +6,7 @@ import asyncio
 import yt_dlp
 from flask import Flask
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import Update, BotCommand
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, CommandHandler, filters
 from groq import AsyncGroq
 from elevenlabs.client import ElevenLabs
@@ -117,11 +117,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"Voice Error: {e}")
         await context.bot.send_message(chat_id=update.effective_chat.id, text="Sorry baby, meri awaaz thodi latak gayi! ✨")
 
+# Telegram Menu Setup
+async def post_init(application):
+    await application.bot.set_my_commands([
+        BotCommand("hello", "Start conversation with Fenix"),
+        BotCommand("music", "Play music from YouTube"),
+        BotCommand("voice", "Ask Fenix to reply in voice")
+    ])
+
 if __name__ == '__main__':
     init_db()
     threading.Thread(target=run_flask).start()
     token = os.environ.get("TELEGRAM_TOKEN")
-    application = ApplicationBuilder().token(token).build()
+    application = ApplicationBuilder().token(token).post_init(post_init).build()
     
     application.add_handler(CommandHandler("music", play_music))
     application.add_handler(CommandHandler("hello", handle_message))
