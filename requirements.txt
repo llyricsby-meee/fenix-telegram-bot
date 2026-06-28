@@ -4,3 +4,5 @@ elevenlabs
 python-telegram-bot
 groq
 requests
+pyrogram
+tgcrypto
