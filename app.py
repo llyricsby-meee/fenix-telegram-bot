@@ -86,7 +86,18 @@ async def chat_handler(client, message):
     reply = await get_ai_response(str(message.chat.id), message.text)
     await message.reply(reply)
 
+# --- अंत में ये रिप्लेस करें ---
 if __name__ == '__main__':
     init_db()
+    
+    # 1. Flask को थ्रेड में चलाएं (यह सही है)
     threading.Thread(target=run_flask).start()
-    bot.run()
+    
+    # 2. बोट को सीधे start() करें (run() की जगह)
+    # यह Main Thread को ब्लॉक नहीं करेगा और Event Loop मिल जाएगा
+    bot.start()
+    print("Fenix is running!")
+    
+    # 3. बोट को चालू रखने के लिए idle() का इस्तेमाल करें
+    from pyrogram import idle
+    idle()
