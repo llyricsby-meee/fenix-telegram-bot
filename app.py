@@ -1,7 +1,7 @@
 import os, logging, sqlite3, asyncio, threading
 from flask import Flask
 from dotenv import load_dotenv
-from pyrogram import Client, filters, idle  # <--- ये रही वो लाइन
+from pyrogram import Client, filters, idle
 from groq import AsyncGroq
 from elevenlabs.client import ElevenLabs
 
