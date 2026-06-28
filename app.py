@@ -1,4 +1,4 @@
-Import os, logging, sqlite3, asyncio, requests, yt_dlp, threading, traceback
+import os, logging, sqlite3, asyncio, requests, yt_dlp, threading, traceback
 from flask import Flask
 from dotenv import load_dotenv
 from telegram import Update
