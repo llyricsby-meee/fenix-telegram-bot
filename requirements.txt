@@ -5,3 +5,4 @@ groq
 requests
 pyrogram
 tgcrypto
+yt-dlp
