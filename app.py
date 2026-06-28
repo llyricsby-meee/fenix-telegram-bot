@@ -1,4 +1,4 @@
-import os, logging, sqlite3, asyncio, requests, yt_dlp, threading, traceback
+Import os, logging, sqlite3, asyncio, requests, yt_dlp, threading, traceback
 from flask import Flask
 from dotenv import load_dotenv
 from telegram import Update
@@ -10,11 +10,12 @@ from elevenlabs.client import ElevenLabs
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 # --- CONFIG ---
-GENERATOR_URL = "https://link-generator-af3a.onrender.com"
+GENERATOR_URL = "https://link-generator-l5eg.vercel.app"
 app = Flask(__name__)
 @app.route('/')
 def home(): return "Fenix is Alive!"
 def run_flask(): app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
+
 
 load_dotenv()
 groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
@@ -144,3 +145,7 @@ if __name__ == '__main__':
     app_bot.add_error_handler(error_handler)
     
     app_bot.run_polling()
+
+
+
+Yehh teek hai ki bhiii ???
