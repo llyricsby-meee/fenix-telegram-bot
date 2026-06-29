@@ -3,13 +3,12 @@ import asyncio
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
-import os, logging, sqlite3, threading
+import os, logging, sqlite3, threading, requests
 from flask import Flask
 from dotenv import load_dotenv
 from pyrogram import Client, filters, idle
 from groq import AsyncGroq
 from elevenlabs.client import ElevenLabs
-import yt_dlp
 
 # --- CONFIG ---
 load_dotenv()
@@ -67,33 +66,42 @@ async def play_music(client, message):
     if not query: return await message.reply("Baby, gaane ka naam batao! `/music [name]`")
     msg = await message.reply("🔎 Gaana dhoond raha hoon, thoda wait karo baby... ❤️")
     
-    # PERMANENT FIX: Changed 'ytsearch1' to 'scsearch1' (SoundCloud) to bypass YouTube bot blocking
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': '/tmp/%(id)s.%(ext)s',
-        'default_search': 'scsearch1',
-        'quiet': True,
-        'nocheckcertificate': True
-    }
-    
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(query, download=True)
-            if 'entries' in info:
-                info = info['entries'][0]
-            file_path = ydl.prepare_filename(info)
+        # JioSaavn Public API से गाना सर्च करना
+        search_url = f"https://saavn.dev/api/search/songs?query={query}"
+        response = requests.get(search_url).json()
+        
+        if not response.get('success') or not response['data']['results']:
+            return await msg.edit("Baby, gaana nahi mila, naam sahi likho! 💔")
             
+        song_data = response['data']['results'][0]
+        song_name = song_data['name']
+        artist_name = song_data['artists']['primary'][0]['name'] if song_data['artists']['primary'] else "Fenix"
+        
+        # बेस्ट क्वालिटी ऑडियो URL निकालना (320kbps या 192kbps)
+        download_url = song_data['downloadUrl'][-1]['url'] 
+        
+        file_path = f"/tmp/{song_data['id']}.mp3"
+        
+        # गाना डाउनलोड करना
+        audio_data = requests.get(download_url).content
+        with open(file_path, 'wb') as f:
+            f.write(audio_data)
+            
+        # टेलीग्राम पर भेजना
         await client.send_audio(
             chat_id=message.chat.id, 
             audio=file_path, 
-            title=info.get('title', 'Unknown Title'), 
-            performer=info.get('uploader', 'Fenix Bot')
+            title=song_name, 
+            performer=artist_name
         )
         await msg.delete()
         if os.path.exists(file_path):
             os.remove(file_path)
+            
     except Exception as e:
-        await msg.edit("Baby, gaana nahi mila ya download fail ho gaya! Phir se try karo! 💔")
+        print(f"Error: {e}")
+        await msg.edit("Baby, gaana download karne mein thodi dikkat hui, phir se try karo! 💔")
 
 @bot.on_message(filters.command("voice"))
 async def voice_handler(client, message):
