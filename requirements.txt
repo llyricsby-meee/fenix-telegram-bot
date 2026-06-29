@@ -3,6 +3,5 @@ python-dotenv
 elevenlabs
 groq
 requests
-pyrogram
-tgcrypto
 yt-dlp
+python-telegram-bot
