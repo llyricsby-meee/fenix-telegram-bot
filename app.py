@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from pyrogram import Client, filters, idle
 from groq import AsyncGroq
 from elevenlabs.client import ElevenLabs
-import yt_dlp  # गाने डाउनलोड करने के लिए नया इम्पोर्ट
+import yt_dlp
 
 # --- CONFIG ---
 load_dotenv()
@@ -67,10 +67,11 @@ async def play_music(client, message):
     if not query: return await message.reply("Baby, gaane ka naam batao! `/music [name]`")
     msg = await message.reply("🔎 Gaana dhoond raha hoon, thoda wait karo baby... ❤️")
     
+    # PERMANENT FIX: Changed 'ytsearch1' to 'scsearch1' (SoundCloud) to bypass YouTube bot blocking
     ydl_opts = {
-        'format': 'bestaudio[ext=m4a]/best',
+        'format': 'bestaudio/best',
         'outtmpl': '/tmp/%(id)s.%(ext)s',
-        'default_search': 'ytsearch1',
+        'default_search': 'scsearch1',
         'quiet': True,
         'nocheckcertificate': True
     }
