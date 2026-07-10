@@ -64,7 +64,6 @@ async def post_init(application):
             BotCommand("voice", "Fenix की आवाज में जवाब सुनें 🎙️")
         ]
         await application.bot.set_my_commands(commands)
-        print("Fenix Bot Menu Configured Perfectly!")
     except Exception as e:
         logging.error(f"Failed to set bot commands menu: {e}")
 
@@ -91,7 +90,6 @@ async def search_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.edit_text("Baby, server respond nahi kar raha. Phir se try karo! 💔")
             return
             
-        # सुरक्षित JSON पार्सिंग (Error No. 4 का फिक्स)
         try:
             data = response.json()
         except:
@@ -118,10 +116,8 @@ async def search_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not video_id: continue
             
             text += f"{index}. *{title[:50]}* [{duration}]\n\n"
-            # बटन डेटा लिमिट को एकदम सेफ रखा है (Error No. 2 का फिक्स)
             keyboard.append([InlineKeyboardButton(f"🎬 {index}. Download Link", callback_data=f"yt_{video_id[:40]}")])
             
-        # ✅ वेरिएबल का नाम एकदम सही और मैच कर दिया गया है (Error No. 1 का फिक्स)
         final_markup = InlineKeyboardMarkup(keyboard)
         await msg.edit_text(text, reply_markup=final_markup, parse_mode='Markdown')
         
@@ -148,6 +144,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         try:
             response = requests.get(f"{RENDER_SERVER_URL}/fetch?url={video_url}", timeout=120)
+            
+            # ✅ SUCCESS LOGIC
             if response.status_code == 200:
                 try:
                     fetch_data = response.json()
@@ -167,7 +165,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         parse_mode='Markdown'
                     )
                     return
-            await query.message.edit_text("Baby, server ne link dene mein bohot der kardi. Ek baar phir try karo! 💔")
+            
+            # 🚨 ERROR CATCHING LOGIC: असली एरर निकालने का नया तरीका
+            try:
+                err_details = response.json().get("error", "No specific error provided by server.")
+            except:
+                err_details = f"HTTP Error {response.status_code}"
+                
+            await query.message.edit_text(f"Baby, download fail ho gaya! 💔\n\n🛠 **Server ka Error:** `{err_details}`")
+            
         except Exception as e:
             logging.error(f"YT Button Click Error: {e}")
             await query.message.edit_text("Baby, link fetch karne mein samay lag raha hai, thodi der baad phir se click karo! 💔")
@@ -215,12 +221,10 @@ async def handle_message(update: Update, update_context: ContextTypes.DEFAULT_TY
 
 if __name__ == '__main__':
     init_db()
-    # फ्लास्क को सुरक्षित थ्रेड में चलाना
     threading.Thread(target=run_flask, daemon=True).start()
     
     app_bot = ApplicationBuilder().token(os.environ.get("TELEGRAM_TOKEN")).post_init(post_init).build()
     
-    # Handlers
     app_bot.add_handler(CommandHandler("search", search_youtube)) 
     app_bot.add_handler(CommandHandler("voice", voice_command))
     app_bot.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
