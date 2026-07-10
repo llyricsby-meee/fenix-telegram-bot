@@ -52,15 +52,16 @@ def update_memory(user_id, text):
         return new_count
     except: return 0
 
-# --- AUTOMATIC COMMANDS MENU ---
-async def set_bot_menu(application):
-    """टेलीग्राम के चैट बॉक्स मेनू में कमांड्स सेट करने के लिए"""
+# --- AUTOMATIC COMMANDS MENU (FIXED) ---
+async def post_init(application):
+    """बॉट स्टार्ट होते ही मेनू कमांड्स अपने आप सेट करने के लिए सुरक्षित तरीका"""
     commands = [
         BotCommand("search", "यूट्यूब से टॉप 10 न्यू वीडियो खोजें 🔍"),
         BotCommand("music", "SoundCloud से गाने खोजें 🎵"),
         BotCommand("voice", "Fenix की आवाज में जवाब सुनें 🎙️")
     ]
     await application.bot.set_my_commands(commands)
+    print("Fenix Bot Menu Configured Successfully!")
 
 # --- ERROR HANDLER ---
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -68,7 +69,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update and update.effective_message:
         await update.effective_message.reply_text("Baby, connection mein thodi dikkat aayi, main abhi theek ho raha hoon! ❤️")
 
-# --- 🔍 NEW YOUTUBE SEARCH FEATURE ---
+# --- 🔍 YOUTUBE SEARCH FEATURE ---
 async def search_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = " ".join(context.args)
     if not query:
@@ -78,7 +79,6 @@ async def search_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("🔍 YouTube par sabse naye results dhoond raha hoon, thoda wait karo baby... ❤️")
     
     try:
-        # आपके रेंडर सर्वर से टॉप 10 न्यू वीडियोज़ की लिस्ट मंगाना
         response = requests.get(f"{RENDER_SERVER_URL}/search?query={query}", timeout=25)
         if response.status_code != 200:
             await msg.edit_text("Baby, server respond nahi kar raha. Phir se try karo! 💔")
@@ -92,7 +92,6 @@ async def search_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = f"🚀 *YouTube Search Results (Latest First):*\n`{query}`\n\n"
         keyboard = []
         
-        # टॉप 10 रिज़ल्ट्स को प्रोसेस करना
         for index, video in enumerate(data["results"][:10], start=1):
             title = video.get("title", "Unknown Title")
             duration_sec = video.get("duration", 0)
@@ -100,7 +99,6 @@ async def search_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
             video_id = video.get("video_id")
             
             text += f"{index}. *{title[:50]}* [{duration}]\n\n"
-            # बटन के callback_data में 'yt_' प्रिफिक्स लगाया है ताकी डाउनलोडर पहचान सके
             keyboard.append([InlineKeyboardButton(f"🎬 {index}. Audio/Video Download", callback_data=f"yt_{video_id}")])
             
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -159,28 +157,22 @@ async def play_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
     data = query.data
     
-    # 🎬 यूट्यूब डाउनलोडर लॉजिक (रेंडर के /fetch एंडपॉइंट से)
     if data.startswith("yt_"):
         video_id = data.split("_")[1]
         video_url = f"https://www.youtube.com/watch?v={video_id}"
-        
         try:
             await query.message.edit_text("📥 Baby, aapki link process ho rahi hai... Just a moment! 🥰")
         except: pass
             
         try:
-            # आपके रेंडर सर्वर के /fetch एंडपॉइंट को कॉल करके डायरेक्ट लिंक मंगाना
             response = requests.get(f"{RENDER_SERVER_URL}/fetch?url={video_url}", timeout=30)
             if response.status_code == 200:
                 fetch_data = response.json()
                 if fetch_data.get("status") == "success" and fetch_data.get("download_url"):
                     d_url = fetch_data.get("download_url")
                     title = fetch_data.get("title", "Video")
-                    
-                    # यूजर को डायरेक्ट डाउनलोड लिंक वाला एक सुंदर बटन देना
                     dl_keyboard = [[InlineKeyboardButton("🚀 Click Here to Download", url=d_url)]]
                     markup = InlineKeyboardMarkup(dl_keyboard)
                     
@@ -195,7 +187,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logging.error(f"YT Button Click Error: {e}")
             await query.message.edit_text("Baby, download link nikalne mein thodi dikkat hui! 💔")
 
-    # 🎵 साउंडक्लाउड डाउनलोडर लॉजिक (पुराना कोड)
     elif data.startswith("sc_"):
         track_id = data.split("_")[1]
         try:
@@ -280,10 +271,10 @@ async def get_ai_response(user_id, user_text):
     )
     return response.choices[0].message.content
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_message(update: Update, update_context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_chat.id)
     update_memory(user_id, update.message.text)
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
+    await update_context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
     await asyncio.sleep(1.5)
     reply = await get_ai_response(user_id, update.message.text)
     await update.message.reply_text(reply)
@@ -292,23 +283,17 @@ if __name__ == '__main__':
     init_db()
     threading.Thread(target=run_flask).start()
     
-    app_bot = ApplicationBuilder().token(os.environ.get("TELEGRAM_TOKEN")).build()
-    
-    # ⚙️ टेलीग्राम मेनू को सेट करना (Asynchronous तरीके से लूप में चलाना)
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(set_bot_menu(app_bot))
+    # ⚙️ यहाँ पर हमने `post_init` को जोड़ दिया है जो बिना क्रैश किए मेनू सेट करेगा
+    app_bot = ApplicationBuilder().token(os.environ.get("TELEGRAM_TOKEN")).post_init(post_init).build()
     
     # Handlers
-    app_bot.add_handler(CommandHandler("search", search_youtube)) # नया यूट्यूब सर्च हैंडलर
+    app_bot.add_handler(CommandHandler("search", search_youtube)) 
     app_bot.add_handler(CommandHandler("music", play_music))
     app_bot.add_handler(CommandHandler("voice", voice_command))
     app_bot.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     
-    # CallbackQueryHandler for Inline Buttons (SoundCloud + YouTube)
     app_bot.add_handler(CallbackQueryHandler(button_callback))
-    
-    # Error Handler
     app_bot.add_error_handler(error_handler)
     
-    print("Fenix is running with YouTube Engine!")
+    print("Fenix is running flawlessly!")
     app_bot.run_polling()
