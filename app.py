@@ -13,7 +13,11 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 app = Flask(__name__)
 @app.route('/')
 def home(): return "Fenix is Alive!"
-def run_flask(): app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
+def run_flask(): 
+    try:
+        app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
+    except Exception as e:
+        logging.error(f"Flask Server Error: {e}")
 
 load_dotenv()
 groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
@@ -54,19 +58,23 @@ def update_memory(user_id, text):
 
 # --- AUTOMATIC COMMANDS MENU ---
 async def post_init(application):
-    """सिर्फ क्लीन सर्च और वॉइस कमांड मेनू में रखने के लिए"""
-    commands = [
-        BotCommand("search", "यूट्यूब से गाने और वीडियो खोजें 🔍"),
-        BotCommand("voice", "Fenix की आवाज में जवाब सुनें 🎙️")
-    ]
-    await application.bot.set_my_commands(commands)
-    print("Fenix Bot Menu Configured Perfectly!")
+    try:
+        commands = [
+            BotCommand("search", "यूट्यूब से गाने और वीडियो खोजें 🔍"),
+            BotCommand("voice", "Fenix की आवाज में जवाब सुनें 🎙️")
+        ]
+        await application.bot.set_my_commands(commands)
+        print("Fenix Bot Menu Configured Perfectly!")
+    except Exception as e:
+        logging.error(f"Failed to set bot commands menu: {e}")
 
 # --- ERROR HANDLER ---
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logging.error(f"Error occurred: {context.error}")
     if update and update.effective_message:
-        await update.effective_message.reply_text("Baby, connection mein thodi dikkat aayi, main abhi theek ho raha hoon! ❤️")
+        try:
+            await update.effective_message.reply_text("Baby, connection mein thodi dikkat aayi, main abhi theek ho raha hoon! ❤️")
+        except: pass
 
 # --- 🔍 YOUTUBE SEARCH FEATURE ---
 async def search_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -78,13 +86,18 @@ async def search_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("🔍 YouTube par sabse naye results dhoond raha hoon, thoda wait karo baby... ❤️")
     
     try:
-        # आपके रेंडर एपीआई सर्वर से सर्च रिजल्ट उठाना
-        response = requests.get(f"{RENDER_SERVER_URL}/search?query={query}", timeout=25)
+        response = requests.get(f"{RENDER_SERVER_URL}/search?query={query}", timeout=45)
         if response.status_code != 200:
             await msg.edit_text("Baby, server respond nahi kar raha. Phir se try karo! 💔")
             return
             
-        data = response.json()
+        # सुरक्षित JSON पार्सिंग (Error No. 4 का फिक्स)
+        try:
+            data = response.json()
+        except:
+            await msg.edit_text("Baby, server se sahi response nahi mila. Dobara try karo! 💔")
+            return
+
         if data.get("status") != "success" or not data.get("results"):
             await msg.edit_text("Baby, YouTube par is naam se kuch nahi mila! 💔")
             return
@@ -96,22 +109,21 @@ async def search_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
             title = video.get("title", "Unknown Title")
             duration_sec = video.get("duration", 0)
             
-            # एरर फ्री ड्यूरेशन कैलकुलेशन लॉजिक
             if duration_sec:
-                try:
-                    duration = f"{int(duration_sec) // 60}:{int(duration_sec) % 60:02d}"
-                except:
-                    duration = "0:00"
-            else:
-                duration = "0:00"
+                try: duration = f"{int(duration_sec) // 60}:{int(duration_sec) % 60:02d}"
+                except: duration = "0:00"
+            else: duration = "0:00"
                 
             video_id = video.get("video_id")
+            if not video_id: continue
             
             text += f"{index}. *{title[:50]}* [{duration}]\n\n"
-            keyboard.append([InlineKeyboardButton(f"🎬 {index}. Audio/Video Download", callback_data=f"yt_{video_id}")])
+            # बटन डेटा लिमिट को एकदम सेफ रखा है (Error No. 2 का फिक्स)
+            keyboard.append([InlineKeyboardButton(f"🎬 {index}. Download Link", callback_data=f"yt_{video_id[:40]}")])
             
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await msg.edit_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+        # ✅ वेरिएबल का नाम एकदम सही और मैच कर दिया गया है (Error No. 1 का फिक्स)
+        final_markup = InlineKeyboardMarkup(keyboard)
+        await msg.edit_text(text, reply_markup=final_markup, parse_mode='Markdown')
         
     except Exception as e:
         logging.error(f"YouTube Search Endpoint Error: {e}")
@@ -120,38 +132,47 @@ async def search_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- SMART CALLBACK BUTTON HANDLER ---
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except: pass
+    
     data = query.data
+    if not data: return
     
     if data.startswith("yt_"):
         video_id = data.split("_")[1]
         video_url = f"https://www.youtube.com/watch?v={video_id}"
         try:
-            await query.message.edit_text("📥 Baby, aapki link process ho rahi hai... Just a moment! 🥰")
+            await query.message.edit_text("📥 Baby, aapki link process ho rahi hai... Isme thoda samay lag sakta hai, please wait karo! 🥰")
         except: pass
             
         try:
-            response = requests.get(f"{RENDER_SERVER_URL}/fetch?url={video_url}", timeout=30)
+            response = requests.get(f"{RENDER_SERVER_URL}/fetch?url={video_url}", timeout=120)
             if response.status_code == 200:
-                fetch_data = response.json()
+                try:
+                    fetch_data = response.json()
+                except:
+                    await query.message.edit_text("Baby, link format mein dikkat aayi! 💔")
+                    return
+
                 if fetch_data.get("status") == "success" and fetch_data.get("download_url"):
                     d_url = fetch_data.get("download_url")
                     title = fetch_data.get("title", "Video")
                     dl_keyboard = [[InlineKeyboardButton("🚀 Click Here to Download", url=d_url)]]
-                    markup = InlineKeyboardMarkup(dl_keyboard)
+                    dl_markup = InlineKeyboardMarkup(dl_keyboard)
                     
                     await query.message.edit_text(
                         f"✅ *Baby, aapka download link taiyar hai!*\n\n🎵 *Title:* {title}\n\nNeeche diye gaye button par click karke direct download karlo! 👇",
-                        reply_markup=markup,
+                        reply_markup=dl_markup,
                         parse_mode='Markdown'
                     )
                     return
-            await query.message.edit_text("Baby, link fetch karne mein dikkat aayi! Phir se try karo. 💔")
+            await query.message.edit_text("Baby, server ne link dene mein bohot der kardi. Ek baar phir try karo! 💔")
         except Exception as e:
             logging.error(f"YT Button Click Error: {e}")
-            await query.message.edit_text("Baby, download link nikalne mein thodi dikkat hui! 💔")
+            await query.message.edit_text("Baby, link fetch karne mein samay lag raha hai, thodi der baad phir se click karo! 💔")
 
-# --- AI AND VOICE FEATURES ---
+# --- AI AND FEATURES ---
 async def voice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user_text = " ".join(context.args)
@@ -194,7 +215,8 @@ async def handle_message(update: Update, update_context: ContextTypes.DEFAULT_TY
 
 if __name__ == '__main__':
     init_db()
-    threading.Thread(target=run_flask).start()
+    # फ्लास्क को सुरक्षित थ्रेड में चलाना
+    threading.Thread(target=run_flask, daemon=True).start()
     
     app_bot = ApplicationBuilder().token(os.environ.get("TELEGRAM_TOKEN")).post_init(post_init).build()
     
