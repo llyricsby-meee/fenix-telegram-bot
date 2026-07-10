@@ -1,4 +1,4 @@
-import os, logging, sqlite3, asyncio, requests, yt_dlp, threading, traceback
+import os, logging, sqlite3, asyncio, requests, threading, traceback
 from flask import Flask
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
@@ -52,16 +52,15 @@ def update_memory(user_id, text):
         return new_count
     except: return 0
 
-# --- AUTOMATIC COMMANDS MENU (FIXED) ---
+# --- AUTOMATIC COMMANDS MENU ---
 async def post_init(application):
-    """बॉट स्टार्ट होते ही मेनू कमांड्स अपने आप सेट करने के लिए सुरक्षित तरीका"""
+    """सिर्फ क्लीन सर्च और वॉइस कमांड मेनू में रखने के लिए"""
     commands = [
-        BotCommand("search", "यूट्यूब से टॉप 10 न्यू वीडियो खोजें 🔍"),
-        BotCommand("music", "SoundCloud से गाने खोजें 🎵"),
+        BotCommand("search", "यूट्यूब से गाने और वीडियो खोजें 🔍"),
         BotCommand("voice", "Fenix की आवाज में जवाब सुनें 🎙️")
     ]
     await application.bot.set_my_commands(commands)
-    print("Fenix Bot Menu Configured Successfully!")
+    print("Fenix Bot Menu Configured Perfectly!")
 
 # --- ERROR HANDLER ---
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -79,6 +78,7 @@ async def search_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("🔍 YouTube par sabse naye results dhoond raha hoon, thoda wait karo baby... ❤️")
     
     try:
+        # आपके रेंडर एपीआई सर्वर से सर्च रिजल्ट उठाना
         response = requests.get(f"{RENDER_SERVER_URL}/search?query={query}", timeout=25)
         if response.status_code != 200:
             await msg.edit_text("Baby, server respond nahi kar raha. Phir se try karo! 💔")
@@ -95,7 +95,16 @@ async def search_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for index, video in enumerate(data["results"][:10], start=1):
             title = video.get("title", "Unknown Title")
             duration_sec = video.get("duration", 0)
-            duration = f"{duration_sec // 60}:{duration_sec % 60:02d}" if duration_sec else "0:00"
+            
+            # एरर फ्री ड्यूरेशन कैलकुलेशन लॉजिक
+            if duration_sec:
+                try:
+                    duration = f"{int(duration_sec) // 60}:{int(duration_sec) % 60:02d}"
+                except:
+                    duration = "0:00"
+            else:
+                duration = "0:00"
+                
             video_id = video.get("video_id")
             
             text += f"{index}. *{title[:50]}* [{duration}]\n\n"
@@ -107,51 +116,6 @@ async def search_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logging.error(f"YouTube Search Endpoint Error: {e}")
         await msg.edit_text("Baby, YouTube search mein dikkat aayi, thodi der baad try karo! 💔")
-
-# --- SOUNDCLOUD FEATURES ---
-async def play_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = " ".join(context.args)
-    if not query:
-        await update.message.reply_text("Baby, gaane ka naam toh batao! `/music [song name]`")
-        return
-        
-    msg = await update.message.reply_text("🔎 SoundCloud par gaane dhoond raha hoon, thoda wait karo baby... ❤️")
-    
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'default_search': 'scsearch5',
-        'quiet': True,
-        'nocheckcertificate': True
-    }
-    
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(query, download=False)
-            
-        if 'entries' not in info or not info['entries']:
-            await msg.edit_text("Baby, SoundCloud par ye gaana nahi mila! 💔")
-            return
-            
-        text = f"🎵 *Hasil pencarian untuk:*\n`{query}`\n\n"
-        keyboard = []
-        
-        for index, entry in enumerate(info['entries'][:5], start=1):
-            if not entry: continue
-            title = entry.get('title', 'Unknown Title')
-            duration_sec = entry.get('duration', 0)
-            duration = f"{duration_sec // 60}:{duration_sec % 60:02d}" if duration_sec else "0:00"
-            uploader = entry.get('uploader', 'SoundCloud Artist')
-            track_id = entry.get('id')
-            
-            text += f"{index}. *{title[:50]}*\n└ 👤 {uploader} [{duration}]\n\n"
-            keyboard.append([InlineKeyboardButton(f"🔢 {index}. Download", callback_data=f"sc_{track_id}")])
-            
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await msg.edit_text(text, reply_markup=reply_markup, parse_mode='Markdown')
-        
-    except Exception as e:
-        logging.error(f"SoundCloud Search Error: {e}")
-        await msg.edit_text("Baby, search karne mein thodi dikkat hui, phir se try karo! 💔")
 
 # --- SMART CALLBACK BUTTON HANDLER ---
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -186,57 +150,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logging.error(f"YT Button Click Error: {e}")
             await query.message.edit_text("Baby, download link nikalne mein thodi dikkat hui! 💔")
-
-    elif data.startswith("sc_"):
-        track_id = data.split("_")[1]
-        try:
-            await query.message.edit_text("📥 Baby, SoundCloud se gaana download ho raha hai... Just a moment! 🥰")
-        except: pass
-            
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': f'/tmp/{track_id}.%(ext)s',
-            'quiet': True,
-            'nocheckcertificate': True
-        }
-        
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(f"scsearch1:id:{track_id}" if not track_id.isdigit() else f"https://api.soundcloud.com/tracks/{track_id}", download=True)
-                if 'entries' in info: info = info['entries'][0]
-                actual_file = ydl.prepare_filename(info)
-                
-            with open(actual_file, 'rb') as audio_file:
-                await context.bot.send_audio(
-                    chat_id=query.message.chat_id,
-                    audio=audio_file,
-                    title=info.get('title', 'Unknown Title'),
-                    performer=info.get('uploader', 'SoundCloud')
-                )
-            await query.message.delete()
-            if os.path.exists(actual_file): os.remove(actual_file)
-            
-        except Exception as e:
-            logging.error(f"Download Error: {e}")
-            try:
-                await query.message.edit_text("Baby, gaana direct download nahi hua, backup try kar raha hoon... 🛠️")
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(f"scsearch1:{track_id}", download=True)
-                    if 'entries' in info: info = info['entries'][0]
-                    actual_file = ydl.prepare_filename(info)
-
-                with open(actual_file, 'rb') as audio_file:
-                    await context.bot.send_audio(
-                        chat_id=query.message.chat_id,
-                        audio=audio_file,
-                        title=info.get('title', 'Unknown Title'),
-                        performer=info.get('uploader', 'SoundCloud')
-                    )
-                await query.message.delete()
-                if os.path.exists(actual_file): os.remove(actual_file)
-            except Exception as err:
-                logging.error(f"Backup Error: {err}")
-                await query.message.edit_text("Baby, download fail ho gaya! Koi dusra option try karo! 💔")
 
 # --- AI AND VOICE FEATURES ---
 async def voice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -283,17 +196,15 @@ if __name__ == '__main__':
     init_db()
     threading.Thread(target=run_flask).start()
     
-    # ⚙️ यहाँ पर हमने `post_init` को जोड़ दिया है जो बिना क्रैश किए मेनू सेट करेगा
     app_bot = ApplicationBuilder().token(os.environ.get("TELEGRAM_TOKEN")).post_init(post_init).build()
     
     # Handlers
     app_bot.add_handler(CommandHandler("search", search_youtube)) 
-    app_bot.add_handler(CommandHandler("music", play_music))
     app_bot.add_handler(CommandHandler("voice", voice_command))
     app_bot.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     
     app_bot.add_handler(CallbackQueryHandler(button_callback))
     app_bot.add_error_handler(error_handler)
     
-    print("Fenix is running flawlessly!")
+    print("Fenix is running flawlessly and cleanly!")
     app_bot.run_polling()
