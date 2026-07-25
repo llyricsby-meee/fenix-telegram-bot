@@ -41,7 +41,7 @@ load_dotenv()
 groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
 eleven_client = ElevenLabs(api_key=os.environ.get("ELEVENLABS_API_KEY"))
 VOICE_ID = os.environ.get("ELEVEN_LABS_VOICE_ID")
-
+PAGE_ACCESS_TOKEN = os.environ.get("FB_PAGE_ACCESS_TOKEN")
 # 📡 आपका रेंडर यूट्यूब सर्वर URL
 RENDER_SERVER_URL = "https://my-youtube-api-1uf5.onrender.com"
 
