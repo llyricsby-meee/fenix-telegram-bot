@@ -1,5 +1,5 @@
 import os, logging, sqlite3, asyncio, requests, threading, traceback
-from flask import Flask
+from flask import Flask, request
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, CommandHandler, CallbackQueryHandler, filters
@@ -13,6 +13,24 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 app = Flask(__name__)
 @app.route('/')
 def home(): return "Fenix is Alive!"
+
+@app.route('/webhook', methods=['GET', 'POST'])
+def webhook():
+    if request.method == 'GET':
+        mode = request.args.get('hub.mode')
+        token = request.args.get('hub.verify_token')
+        challenge = request.args.get('hub.challenge')
+        verify_token = os.environ.get("VERIFY_TOKEN")
+        if mode and token:
+            if mode == 'subscribe' and token == verify_token:
+                logging.info("WEBHOOK_VERIFIED")
+                return challenge, 200
+            return "Forbidden", 403
+        return "Webhook Endpoint", 200
+    data = request.json
+    logging.info(f"Incoming Webhook Data: {data}")
+    return "EVENT_RECEIVED", 200
+
 def run_flask(): 
     try:
         app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
@@ -160,13 +178,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     dl_markup = InlineKeyboardMarkup(dl_keyboard)
                     
                     await query.message.edit_text(
-                        f"✅ *Baby, aapka download link taiyar hai!*\n\n🎵 *Title:* {title}\n\nNeeche diye gaye button par click karke direct download karlo! 👇",
+                        f"✅ *Baby, aapka download link taiyar hai!*\n\n🎵 *Title:* {title}\n\nNeeche दिए गए button par click karke direct download karlo! 👇",
                         reply_markup=dl_markup,
                         parse_mode='Markdown'
                     )
                     return
             
-            # 🚨 ERROR CATCHING LOGIC: असली एरर निकालने का नया तरीका
+            # 🚨 ERROR CATCHING LOGIC
             try:
                 err_details = response.json().get("error", "No specific error provided by server.")
             except:
@@ -234,3 +252,4 @@ if __name__ == '__main__':
     
     print("Fenix is running flawlessly and cleanly!")
     app_bot.run_polling()
+            
