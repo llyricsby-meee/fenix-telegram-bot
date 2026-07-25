@@ -27,8 +27,24 @@ def webhook():
                 return challenge, 200
             return "Forbidden", 403
         return "Webhook Endpoint", 200
+        
+    # POST request handling for Instagram/Facebook messages
     data = request.json
     logging.info(f"Incoming Webhook Data: {data}")
+    
+    try:
+        if data.get("object") == "instagram":
+            for entry in data.get("entry", []):
+                for messaging in entry.get("messaging", []):
+                    sender_id = messaging.get("sender", {}).get("id")
+                    message_text = messaging.get("message", {}).get("text")
+                    
+                    if sender_id and message_text:
+                        logging.info(f"Received Instagram message from {sender_id}: {message_text}")
+                        # यहाँ आप चाहें तो Instagram API के ज़रिये रिप्लाई भेजने का कोड जोड़ सकते हैं
+    except Exception as e:
+        logging.error(f"Error processing webhook event: {e}")
+        
     return "EVENT_RECEIVED", 200
 
 def run_flask(): 
@@ -163,7 +179,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             response = requests.get(f"{RENDER_SERVER_URL}/fetch?url={video_url}", timeout=120)
             
-            # ✅ SUCCESS LOGIC
             if response.status_code == 200:
                 try:
                     fetch_data = response.json()
@@ -184,7 +199,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                     return
             
-            # 🚨 ERROR CATCHING LOGIC
             try:
                 err_details = response.json().get("error", "No specific error provided by server.")
             except:
@@ -252,4 +266,4 @@ if __name__ == '__main__':
     
     print("Fenix is running flawlessly and cleanly!")
     app_bot.run_polling()
-            
+        
