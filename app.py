@@ -46,8 +46,9 @@ def send_instagram_voice(recipient_id, audio_file_path):
                 'recipient': f'{{"id":"{recipient_id}"}}',
                 'message': '{"attachment":{"type":"audio", "payload":{}}}'
             }
+            # इंस्टाग्राम के लिए सही ऑडियो टाइप और मियाद सेट की गई है
             files = {
-                'file': ('voice.mp3', audio_file, 'audio/mpeg')
+                'file': ('voice.mp4', audio_file, 'audio/mp4')
             }
             response = requests.post(url, data=payload, files=files, timeout=30)
             if response.status_code != 200:
@@ -71,7 +72,6 @@ def webhook():
             return "Forbidden", 403
         return "Webhook Endpoint", 200
         
-    # POST request handling for Instagram/Facebook messages
     data = request.json
     logging.info(f"Incoming Webhook Data: {data}")
     
@@ -82,24 +82,21 @@ def webhook():
                     sender_id = messaging.get("sender", {}).get("id")
                     message_text = messaging.get("message", {}).get("text")
                     
-                    # Ignore echoes or messages sent by the bot itself
                     if sender_id and message_text and not messaging.get("message", {}).get("is_echo"):
                         logging.info(f"Received Instagram message from {sender_id}: {message_text}")
                         
-                        # Memory and AI Response for Instagram
-                        count = update_memory(str(sender_id), message_text)
+                        update_memory(str(sender_id), message_text)
                         
-                        # Generate AI reply synchronously or using a thread since Flask is sync here
                         async def fetch_and_reply():
                             ai_reply = await get_ai_response(str(sender_id), message_text)
                             
-                            # यदि यूजर ने टेक्स्ट में voice या audio कहा है, तो वॉइस नोट भेजें, अन्यथा टेक्स्ट
+                            # जब भी चैट में voice या audio कहा जाएगा, यह सीधे वॉइस नोट भेजेगा
                             if "voice" in message_text.lower() or "audio" in message_text.lower():
                                 try:
                                     audio = eleven_client.text_to_speech.convert(text=ai_reply, voice_id=VOICE_ID, model_id="eleven_multilingual_v2")
-                                    with open("/tmp/r_insta.mp3", "wb") as f:
+                                    with open("/tmp/r_insta.mp4", "wb") as f:
                                         for chunk in audio: f.write(chunk)
-                                    send_instagram_voice(sender_id, "/tmp/r_insta.mp3")
+                                    send_instagram_voice(sender_id, "/tmp/r_insta.mp4")
                                     return
                                 except Exception as ex:
                                     logging.error(f"Insta Voice Gen Error: {ex}")
@@ -124,7 +121,6 @@ groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
 eleven_client = ElevenLabs(api_key=os.environ.get("ELEVENLABS_API_KEY"))
 VOICE_ID = os.environ.get("ELEVEN_LABS_VOICE_ID")
 PAGE_ACCESS_TOKEN = os.environ.get("FB_PAGE_ACCESS_TOKEN")
-# 📡 आपका रेंडर यूट्यूब सर्वर URL
 RENDER_SERVER_URL = "https://my-youtube-api-1uf5.onrender.com"
 
 # --- MEMORY ENGINE ---
