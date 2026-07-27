@@ -296,4 +296,4 @@ if __name__ == '__main__':
     
     print("Fenix is running flawlessly and cleanly!")
     app_bot.run_polling()
-        t 
+                    
