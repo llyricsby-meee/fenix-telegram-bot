@@ -1,4 +1,4 @@
-import os, logging, sqlite3, asyncio, requests, threading, traceback
+import os, logging, sqlite3, asyncio, requests, threading, traceback, subprocess
 from flask import Flask, request
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
@@ -17,39 +17,22 @@ def home(): return "Fenix is Alive!"
 # --- INSTAGRAM REPLY HELPERS ---
 def send_instagram_reply(recipient_id, message_text):
     page_token = os.environ.get("FB_PAGE_ACCESS_TOKEN")
-    if not page_token:
-        logging.error("FB_PAGE_ACCESS_TOKEN is missing!")
-        return
+    if not page_token: return
     url = f"https://graph.facebook.com/v25.0/me/messages?access_token={page_token}"
-    payload = {
-        "recipient": {"id": recipient_id},
-        "message": {"text": message_text}
-    }
+    payload = {"recipient": {"id": recipient_id}, "message": {"text": message_text}}
     headers = {"Content-Type": "application/json"}
-    try:
-        response = requests.post(url, json=payload, headers=headers, timeout=10)
-        if response.status_code != 200:
-            logging.error(f"Failed to send Instagram reply: {response.text}")
-    except Exception as e:
-        logging.error(f"Instagram Reply Error: {e}")
+    try: requests.post(url, json=payload, headers=headers, timeout=10)
+    except: pass
 
 def send_instagram_voice(recipient_id, audio_file_path):
     page_token = os.environ.get("FB_PAGE_ACCESS_TOKEN")
-    if not page_token:
-        logging.error("FB_PAGE_ACCESS_TOKEN is missing!")
-        return
-        
+    if not page_token: return
     url = f"https://graph.facebook.com/v25.0/me/messages?access_token={page_token}"
     try:
         with open(audio_file_path, 'rb') as audio_file:
-            payload = {
-                'recipient': f'{{"id":"{recipient_id}"}}',
-                'message': '{"attachment":{"type":"audio", "payload":{}}}'
-            }
-            # इंस्टाग्राम के लिए सही ऑडियो टाइप और मियाद सेट की गई है
-            files = {
-                'file': ('voice.mp4', audio_file, 'audio/mp4')
-            }
+            payload = {'recipient': f'{{"id":"{recipient_id}"}}', 'message': '{"attachment":{"type":"audio", "payload":{}}}'}
+            # Instagram strictly wants audio/mp4 for m4a files
+            files = {'file': ('voice.m4a', audio_file, 'audio/mp4')}
             response = requests.post(url, data=payload, files=files, timeout=30)
             if response.status_code != 200:
                 logging.error(f"Failed to send Instagram voice: {response.text}")
@@ -64,13 +47,9 @@ def webhook():
         mode = request.args.get('hub.mode')
         token = request.args.get('hub.verify_token')
         challenge = request.args.get('hub.challenge')
-        verify_token = os.environ.get("VERIFY_TOKEN")
-        if mode and token:
-            if mode == 'subscribe' and token == verify_token:
-                logging.info("WEBHOOK_VERIFIED")
-                return challenge, 200
-            return "Forbidden", 403
-        return "Webhook Endpoint", 200
+        if mode and token and mode == 'subscribe' and token == os.environ.get("VERIFY_TOKEN"):
+            return challenge, 200
+        return "Forbidden", 403
         
     data = request.json
     logging.info(f"Incoming Webhook Data: {data}")
@@ -83,20 +62,28 @@ def webhook():
                     message_text = messaging.get("message", {}).get("text")
                     
                     if sender_id and message_text and not messaging.get("message", {}).get("is_echo"):
-                        logging.info(f"Received Instagram message from {sender_id}: {message_text}")
-                        
                         update_memory(str(sender_id), message_text)
                         
                         async def fetch_and_reply():
                             ai_reply = await get_ai_response(str(sender_id), message_text)
                             
-                            # जब भी चैट में voice या audio कहा जाएगा, यह सीधे वॉइस नोट भेजेगा
+                            # MAGIC TRICK: Convert Voice on the fly!
                             if "voice" in message_text.lower() or "audio" in message_text.lower():
                                 try:
                                     audio = eleven_client.text_to_speech.convert(text=ai_reply, voice_id=VOICE_ID, model_id="eleven_multilingual_v2")
-                                    with open("/tmp/r_insta.mp4", "wb") as f:
+                                    mp3_path = "/tmp/r_insta.mp3"
+                                    m4a_path = "/tmp/r_insta.m4a"
+                                    
+                                    with open(mp3_path, "wb") as f:
                                         for chunk in audio: f.write(chunk)
-                                    send_instagram_voice(sender_id, "/tmp/r_insta.mp4")
+                                    
+                                    # Convert MP3 to M4A using internal system command
+                                    try:
+                                        subprocess.run(["ffmpeg", "-y", "-i", mp3_path, "-c:a", "aac", m4a_path], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                        send_instagram_voice(sender_id, m4a_path)
+                                    except Exception as e:
+                                        logging.error(f"FFmpeg conversion failed: {e}")
+                                        send_instagram_reply(sender_id, "Baby, server par thodi technical dikkat aayi isliye voice convert nahi hui, par I'm saying this with love! ❤️\n\n" + ai_reply)
                                     return
                                 except Exception as ex:
                                     logging.error(f"Insta Voice Gen Error: {ex}")
@@ -111,16 +98,13 @@ def webhook():
     return "EVENT_RECEIVED", 200
 
 def run_flask(): 
-    try:
-        app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
-    except Exception as e:
-        logging.error(f"Flask Server Error: {e}")
+    try: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
+    except Exception as e: logging.error(f"Flask Server Error: {e}")
 
 load_dotenv()
 groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
 eleven_client = ElevenLabs(api_key=os.environ.get("ELEVENLABS_API_KEY"))
 VOICE_ID = os.environ.get("ELEVEN_LABS_VOICE_ID")
-PAGE_ACCESS_TOKEN = os.environ.get("FB_PAGE_ACCESS_TOKEN")
 RENDER_SERVER_URL = "https://my-youtube-api-1uf5.onrender.com"
 
 # --- MEMORY ENGINE ---
@@ -154,22 +138,14 @@ def update_memory(user_id, text):
 
 # --- AUTOMATIC COMMANDS MENU ---
 async def post_init(application):
-    try:
-        commands = [
-            BotCommand("search", "यूट्यूब से गाने और वीडियो खोजें 🔍"),
-            BotCommand("voice", "Fenix की आवाज में जवाब सुनें 🎙️")
-        ]
-        await application.bot.set_my_commands(commands)
-    except Exception as e:
-        logging.error(f"Failed to set bot commands menu: {e}")
+    commands = [BotCommand("search", "यूट्यूब से गाने और वीडियो खोजें 🔍"), BotCommand("voice", "Fenix की आवाज में जवाब सुनें 🎙️")]
+    try: await application.bot.set_my_commands(commands)
+    except: pass
 
 # --- ERROR HANDLER ---
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logging.error(f"Error occurred: {context.error}")
-    if update and update.effective_message:
-        try:
-            await update.effective_message.reply_text("Baby, connection mein thodi dikkat aayi, main abhi theek ho raha hoon! ❤️")
-        except: pass
+    try: await update.effective_message.reply_text("Baby, connection mein dikkat aayi! ❤️")
+    except: pass
 
 # --- 🔍 YOUTUBE SEARCH FEATURE ---
 async def search_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -177,100 +153,45 @@ async def search_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not query:
         await update.message.reply_text("Baby, kis gane ya video ko dhoondna hai? `/search [naam]`")
         return
-        
-    msg = await update.message.reply_text("🔍 YouTube par sabse naye results dhoond raha hoon, thoda wait karo baby... ❤️")
-    
+    msg = await update.message.reply_text("🔍 YouTube par dhoond raha hoon, thoda wait karo baby... ❤️")
     try:
         response = requests.get(f"{RENDER_SERVER_URL}/search?query={query}", timeout=45)
-        if response.status_code != 200:
-            await msg.edit_text("Baby, server respond nahi kar raha. Phir se try karo! 💔")
-            return
-            
-        try:
-            data = response.json()
-        except:
-            await msg.edit_text("Baby, server se sahi response nahi mila. Dobara try karo! 💔")
-            return
-
+        data = response.json()
         if data.get("status") != "success" or not data.get("results"):
             await msg.edit_text("Baby, YouTube par is naam se kuch nahi mila! 💔")
             return
-            
-        text = f"🚀 *YouTube Search Results (Latest First):*\n`{query}`\n\n"
+        text = f"🚀 *YouTube Search Results:*\n`{query}`\n\n"
         keyboard = []
-        
         for index, video in enumerate(data["results"][:10], start=1):
-            title = video.get("title", "Unknown Title")
-            duration_sec = video.get("duration", 0)
-            
-            if duration_sec:
-                try: duration = f"{int(duration_sec) // 60}:{int(duration_sec) % 60:02d}"
-                except: duration = "0:00"
-            else: duration = "0:00"
-                
-            video_id = video.get("video_id")
+            title, duration_sec, video_id = video.get("title", "Unknown"), video.get("duration", 0), video.get("video_id")
             if not video_id: continue
-            
+            duration = f"{int(duration_sec) // 60}:{int(duration_sec) % 60:02d}" if duration_sec else "0:00"
             text += f"{index}. *{title[:50]}* [{duration}]\n\n"
             keyboard.append([InlineKeyboardButton(f"🎬 {index}. Download Link", callback_data=f"yt_{video_id[:40]}")])
-            
-        final_markup = InlineKeyboardMarkup(keyboard)
-        await msg.edit_text(text, reply_markup=final_markup, parse_mode='Markdown')
-        
-    except Exception as e:
-        logging.error(f"YouTube Search Endpoint Error: {e}")
-        await msg.edit_text("Baby, YouTube search mein dikkat aayi, thodi der baad try karo! 💔")
+        await msg.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+    except:
+        await msg.edit_text("Baby, search mein dikkat aayi! 💔")
 
 # --- SMART CALLBACK BUTTON HANDLER ---
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    try:
-        await query.answer()
+    try: await query.answer()
     except: pass
-    
     data = query.data
-    if not data: return
-    
-    if data.startswith("yt_"):
-        video_id = data.split("_")[1]
-        video_url = f"https://www.youtube.com/watch?v={video_id}"
-        try:
-            await query.message.edit_text("📥 Baby, aapki link process ho rahi hai... Isme thoda samay lag sakta hai, please wait karo! 🥰")
-        except: pass
-            
-        try:
-            response = requests.get(f"{RENDER_SERVER_URL}/fetch?url={video_url}", timeout=120)
-            
-            if response.status_code == 200:
-                try:
-                    fetch_data = response.json()
-                except:
-                    await query.message.edit_text("Baby, link format mein dikkat aayi! 💔")
-                    return
-
-                if fetch_data.get("status") == "success" and fetch_data.get("download_url"):
-                    d_url = fetch_data.get("download_url")
-                    title = fetch_data.get("title", "Video")
-                    dl_keyboard = [[InlineKeyboardButton("🚀 Click Here to Download", url=d_url)]]
-                    dl_markup = InlineKeyboardMarkup(dl_keyboard)
-                    
-                    await query.message.edit_text(
-                        f"✅ *Baby, aapka download link taiyar hai!*\n\n🎵 *Title:* {title}\n\nNeeche दिए गए button par click karke direct download karlo! 👇",
-                        reply_markup=dl_markup,
-                        parse_mode='Markdown'
-                    )
-                    return
-            
-            try:
-                err_details = response.json().get("error", "No specific error provided by server.")
-            except:
-                err_details = f"HTTP Error {response.status_code}"
-                
-            await query.message.edit_text(f"Baby, download fail ho gaya! 💔\n\n🛠 **Server ka Error:** `{err_details}`")
-            
-        except Exception as e:
-            logging.error(f"YT Button Click Error: {e}")
-            await query.message.edit_text("Baby, link fetch karne mein samay lag raha hai, thodi der baad phir se click karo! 💔")
+    if not data or not data.startswith("yt_"): return
+    video_id = data.split("_")[1]
+    try: await query.message.edit_text("📥 Baby, aapki link process ho rahi hai... Wait karo! 🥰")
+    except: pass
+    try:
+        response = requests.get(f"{RENDER_SERVER_URL}/fetch?url=https://www.youtube.com/watch?v={video_id}", timeout=120)
+        fetch_data = response.json()
+        if fetch_data.get("status") == "success" and fetch_data.get("download_url"):
+            dl_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Click Here to Download", url=fetch_data.get("download_url"))]])
+            await query.message.edit_text(f"✅ *Link Taiyar Hai!*\n\n🎵 *Title:* {fetch_data.get('title', 'Video')}\n👇", reply_markup=dl_markup, parse_mode='Markdown')
+            return
+        await query.message.edit_text("Baby, download fail ho gaya! 💔")
+    except:
+        await query.message.edit_text("Baby, link fetch karne mein error aayi! 💔")
 
 # --- AI AND FEATURES ---
 async def voice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -287,7 +208,6 @@ async def voice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with open("/tmp/r.mp3", "rb") as voice_file:
             await update.message.reply_voice(voice=voice_file)
     except Exception as e:
-        logging.error(f"Voice Error: {e}")
         await update.message.reply_text("Voice generate nahi ho payi, sorry baby!")
 
 async def get_ai_response(user_id, user_text):
@@ -297,10 +217,7 @@ async def get_ai_response(user_id, user_text):
     else: mode = "Very flirty, playful, romantic and possessive male boyfriend"
     
     response = await groq_client.chat.completions.create(
-        messages=[
-            {"role": "system", "content": f"You are Fenix, a charming male boyfriend. {mode}. Memory: {memories}"},
-            {"role": "user", "content": user_text}
-        ],
+        messages=[{"role": "system", "content": f"You are Fenix, a charming male boyfriend. {mode}. Memory: {memories}"}, {"role": "user", "content": user_text}],
         model="llama-3.3-70b-versatile",
     )
     return response.choices[0].message.content
@@ -316,16 +233,12 @@ async def handle_message(update: Update, update_context: ContextTypes.DEFAULT_TY
 if __name__ == '__main__':
     init_db()
     threading.Thread(target=run_flask, daemon=True).start()
-    
     app_bot = ApplicationBuilder().token(os.environ.get("TELEGRAM_TOKEN")).post_init(post_init).build()
-    
     app_bot.add_handler(CommandHandler("search", search_youtube)) 
     app_bot.add_handler(CommandHandler("voice", voice_command))
     app_bot.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-    
     app_bot.add_handler(CallbackQueryHandler(button_callback))
     app_bot.add_error_handler(error_handler)
-    
     print("Fenix is running flawlessly and cleanly!")
     app_bot.run_polling()
     
