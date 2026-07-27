@@ -14,6 +14,25 @@ app = Flask(__name__)
 @app.route('/')
 def home(): return "Fenix is Alive!"
 
+# --- INSTAGRAM REPLY HELPER ---
+def send_instagram_reply(recipient_id, message_text):
+    page_token = os.environ.get("FB_PAGE_ACCESS_TOKEN")
+    if not page_token:
+        logging.error("FB_PAGE_ACCESS_TOKEN is missing!")
+        return
+    url = f"https://graph.facebook.com/v25.0/me/messages?access_token={page_token}"
+    payload = {
+        "recipient": {"id": recipient_id},
+        "message": {"text": message_text}
+    }
+    headers = {"Content-Type": "application/json"}
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        if response.status_code != 200:
+            logging.error(f"Failed to send Instagram reply: {response.text}")
+    except Exception as e:
+        logging.error(f"Instagram Reply Error: {e}")
+
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
     if request.method == 'GET':
@@ -39,9 +58,20 @@ def webhook():
                     sender_id = messaging.get("sender", {}).get("id")
                     message_text = messaging.get("message", {}).get("text")
                     
-                    if sender_id and message_text:
+                    # Ignore echoes or messages sent by the bot itself
+                    if sender_id and message_text and not messaging.get("message", {}).get("is_echo"):
                         logging.info(f"Received Instagram message from {sender_id}: {message_text}")
-                        # यहाँ आप चाहें तो Instagram API के ज़रिये रिप्लाई भेजने का कोड जोड़ सकते हैं
+                        
+                        # Memory and AI Response for Instagram
+                        count = update_memory(str(sender_id), message_text)
+                        
+                        # Generate AI reply synchronously or using a thread since Flask is sync here
+                        async def fetch_and_reply():
+                            ai_reply = await get_ai_response(str(sender_id), message_text)
+                            send_instagram_reply(sender_id, ai_reply)
+                        
+                        threading.Thread(target=lambda: asyncio.run(fetch_and_reply()), daemon=True).start()
+                        
     except Exception as e:
         logging.error(f"Error processing webhook event: {e}")
         
@@ -266,4 +296,4 @@ if __name__ == '__main__':
     
     print("Fenix is running flawlessly and cleanly!")
     app_bot.run_polling()
-        
+        t 
