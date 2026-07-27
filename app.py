@@ -33,7 +33,7 @@ def humanize_text(text):
         text = random.choice(slangs).capitalize() + ", " + text.lower()
     return text
 
-# --- INSTAGRAM SEEN, TYPING & REPLY HELPERS ---
+# --- INSTAGRAM SEEN, TYPING & ONLINE SIMULATION ---
 def mark_message_seen(recipient_id):
     page_token = os.environ.get("FB_PAGE_ACCESS_TOKEN")
     if not page_token: return
@@ -56,10 +56,10 @@ def send_instagram_reply(recipient_id, message_text):
     page_token = os.environ.get("FB_PAGE_ACCESS_TOKEN")
     if not page_token: return
     
-    # 1. टाइपिंग शुरू करें
+    # 1. 'Typing...' स्टेटस ऑन करें (जिससे यूजर को बोट Online और Typing दिखेगा)
     send_typing_indicator(recipient_id, "typing_on")
     
-    # 2. नेचुरल डिले
+    # 2. इंसानों की तरह सोचने/टाइप करने का नेचुरल डिले (1 से 3 सेकंड)
     delay = min(max(len(message_text) * 0.05, 1), 3)
     time.sleep(delay)
     
@@ -72,7 +72,7 @@ def send_instagram_reply(recipient_id, message_text):
     except Exception as e:
         logging.error(f"Instagram Reply Error: {e}")
         
-    # 4. टाइपिंग बंद करें
+    # 4. टाइपिंग स्टेटस बंद करें
     send_typing_indicator(recipient_id, "typing_off")
 
 def send_instagram_voice(recipient_id, audio_file_path):
@@ -108,8 +108,11 @@ def webhook():
                     message_text = messaging.get("message", {}).get("text")
                     
                     if sender_id and message_text and not messaging.get("message", {}).get("is_echo"):
-                        # 1. मैसेज मिलते ही सबसे पहले 'Seen' स्टेटस दिखाएं
+                        # STEP 1: मैसेज मिलते ही 'Seen' स्टेटस दिखाएं
                         mark_message_seen(str(sender_id))
+                        
+                        # हल्का सा गैप (0.5s) ताकि सीन होने और टाइपिंग शुरू होने में फर्क दिखे
+                        time.sleep(0.5)
                         
                         update_memory(str(sender_id), message_text)
                         
@@ -120,7 +123,6 @@ def webhook():
                             
                             if "voice" in message_text.lower() or "audio" in message_text.lower():
                                 try:
-                                    # आवाज बदलने के लिए ELEVEN_LABS_VOICE_ID काम करेगा
                                     audio = eleven_client.text_to_speech.convert(
                                         text=ai_reply, 
                                         voice_id=VOICE_ID, 
@@ -151,7 +153,7 @@ def run_flask():
 load_dotenv()
 groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
 eleven_client = ElevenLabs(api_key=os.environ.get("ELEVENLABS_API_KEY"))
-VOICE_ID = os.environ.get("ELEVEN_LABS_VOICE_ID") # यहाँ आपकी नई ElevenLabs Voice ID ले रहा है
+VOICE_ID = os.environ.get("ELEVEN_LABS_VOICE_ID")
 RENDER_SERVER_URL = "https://my-youtube-api-1uf5.onrender.com"
 
 # --- MEMORY ENGINE ---
@@ -295,8 +297,8 @@ if __name__ == '__main__':
     app_bot.add_handler(CommandHandler("search", search_youtube)) 
     app_bot.add_handler(CommandHandler("voice", voice_command))
     app_bot.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-    app_bot.add_handler(CallbackQueryGraph(button_callback) if 'CallbackQueryGraph' in globals() else CallbackQueryHandler(button_callback))
+    app_bot.add_handler(CallbackQueryHandler(button_callback))
     app_bot.add_error_handler(error_handler)
-    print("Fenix is running with Seen Status, Typing and New Voice Support!")
+    print("Fenix is running smoothly!")
     app_bot.run_polling()
-                                    
+        
