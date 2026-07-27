@@ -52,27 +52,35 @@ def send_typing_indicator(recipient_id, action="typing_on"):
     try: requests.post(url, json=payload, headers=headers, timeout=5)
     except: pass
 
-def send_instagram_reply(recipient_id, message_text):
+def send_instagram_reply(recipient_id, message_text, is_group=False):
     page_token = os.environ.get("FB_PAGE_ACCESS_TOKEN")
     if not page_token: return
     
-    # 1. 'Typing...' स्टेटस ऑन करें (जिससे यूजर को बोट Online और Typing दिखेगा)
+    # Typing indicator
     send_typing_indicator(recipient_id, "typing_on")
     
-    # 2. इंसानों की तरह सोचने/टाइप करने का नेचुरल डिले (1 से 3 सेकंड)
+    # Natural delay
     delay = min(max(len(message_text) * 0.05, 1), 3)
     time.sleep(delay)
     
-    # 3. मैसेज भेजें
     url = f"https://graph.facebook.com/v25.0/me/messages?access_token={page_token}"
-    payload = {"recipient": {"id": recipient_id}, "message": {"text": message_text}}
+    
+    # अगर यह ग्रुप मैसेज है, तो 'message_type' को 'RESPONSE' पर सेट करना पड़ सकता है
+    # हालाँकि, Facebook Graph API में recipient.id आमतौर पर ग्रुप थ्रेड ID को भी सपोर्ट करता है।
+    payload = {
+        "recipient": {"id": recipient_id},
+        "message": {"text": message_text}
+    }
     headers = {"Content-Type": "application/json"}
+    
     try: 
-        requests.post(url, json=payload, headers=headers, timeout=10)
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        if response.status_code != 200:
+             logging.error(f"Instagram Reply Error: {response.text}")
     except Exception as e:
-        logging.error(f"Instagram Reply Error: {e}")
+        logging.error(f"Instagram Reply Exception: {e}")
         
-    # 4. टाइपिंग स्टेटस बंद करें
+    # Typing indicator off
     send_typing_indicator(recipient_id, "typing_off")
 
 def send_instagram_voice(recipient_id, audio_file_path):
@@ -104,14 +112,29 @@ def webhook():
         if data.get("object") == "instagram":
             for entry in data.get("entry", []):
                 for messaging in entry.get("messaging", []):
+                    # Sender ID और Message Text प्राप्त करें
                     sender_id = messaging.get("sender", {}).get("id")
                     message_text = messaging.get("message", {}).get("text")
                     
+                    # यह चेक करने के लिए कि क्या यह ग्रुप चैट से आया है या कोई mention है
+                    # (webhook payload में कभी-कभी 'tags' या 'mentions' की जानकारी भी होती है, 
+                    # लेकिन सबसे आसान तरीका है मैसेज टेक्स्ट में अपना @username ढूँढना)
+                    
+                    # अपना Instagram Username यहाँ डालें (बिना @ के)
+                    # आप इसे .env से भी ले सकते हैं, जैसे: os.environ.get("INSTAGRAM_USERNAME")
+                    bot_username = os.environ.get("INSTAGRAM_USERNAME", "really_innocent_.nawab").lower()
+                    
                     if sender_id and message_text and not messaging.get("message", {}).get("is_echo"):
-                        # STEP 1: मैसेज मिलते ही 'Seen' स्टेटस दिखाएं
-                        mark_message_seen(str(sender_id))
                         
-                        # हल्का सा गैप (0.5s) ताकि सीन होने और टाइपिंग शुरू होने में फर्क दिखे
+                        # चेक करें कि क्या यह ग्रुप चैट का मैसेज है (अगर मैसेज में @username है)
+                        is_mention = f"@{bot_username}" in message_text.lower()
+                        
+                        # अगर मैसेज में @username है, तो उसे हटा दें ताकि AI कन्फ्यूज़ न हो
+                        if is_mention:
+                             message_text = re.sub(rf'@{bot_username}', '', message_text, flags=re.IGNORECASE).strip()
+                        
+                        # Mark Seen
+                        mark_message_seen(str(sender_id))
                         time.sleep(0.5)
                         
                         update_memory(str(sender_id), message_text)
@@ -138,7 +161,8 @@ def webhook():
                                 except Exception as ex:
                                     logging.error(f"Insta Voice Gen Error: {ex}")
                                     
-                            send_instagram_reply(sender_id, ai_reply)
+                            # ग्रुप चैट के लिए रिप्लाई (API अपने आप sender_id के आधार पर थ्रेड को पहचान लेती है)
+                            send_instagram_reply(sender_id, ai_reply, is_group=is_mention)
                         
                         threading.Thread(target=lambda: asyncio.run(fetch_and_reply()), daemon=True).start()
     except Exception as e:
@@ -299,6 +323,6 @@ if __name__ == '__main__':
     app_bot.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     app_bot.add_handler(CallbackQueryHandler(button_callback))
     app_bot.add_error_handler(error_handler)
-    print("Fenix is running smoothly!")
+    print("Fenix is running smoothly with Group Chat Mention Support!")
     app_bot.run_polling()
-        
+                       
