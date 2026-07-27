@@ -27,15 +27,22 @@ def clean_text_for_speech(text):
 def humanize_text(text):
     if not text: return text
     slangs = ["kyaa", "acha", "bta", "sachii", "umm...", "hehe", "haan", "na"]
-    # कभी-कभी अंत में '...' जोड़ना
     if random.random() > 0.6 and not text.endswith("..."):
         text = text + " ..."
-    # कभी-कभी शुरुआत में स्लैंग डालना
     if random.random() > 0.7 and not any(text.lower().startswith(s) for s in slangs):
         text = random.choice(slangs).capitalize() + ", " + text.lower()
     return text
 
-# --- INSTAGRAM HUMAN TOUCH & TYPING INDICATOR ---
+# --- INSTAGRAM SEEN, TYPING & REPLY HELPERS ---
+def mark_message_seen(recipient_id):
+    page_token = os.environ.get("FB_PAGE_ACCESS_TOKEN")
+    if not page_token: return
+    url = f"https://graph.facebook.com/v25.0/me/messages?access_token={page_token}"
+    payload = {"recipient": {"id": recipient_id}, "sender_action": "mark_seen"}
+    headers = {"Content-Type": "application/json"}
+    try: requests.post(url, json=payload, headers=headers, timeout=5)
+    except: pass
+
 def send_typing_indicator(recipient_id, action="typing_on"):
     page_token = os.environ.get("FB_PAGE_ACCESS_TOKEN")
     if not page_token: return
@@ -49,14 +56,14 @@ def send_instagram_reply(recipient_id, message_text):
     page_token = os.environ.get("FB_PAGE_ACCESS_TOKEN")
     if not page_token: return
     
-    # 1. पहले 'Typing...' दिखाएं
+    # 1. टाइपिंग शुरू करें
     send_typing_indicator(recipient_id, "typing_on")
     
-    # 2. इंसान के टाइप करने जैसा रैंडम डिले (मैसेज की लंबाई के हिसाब से 1 से 3 सेकंड)
+    # 2. नेचुरल डिले
     delay = min(max(len(message_text) * 0.05, 1), 3)
     time.sleep(delay)
     
-    # 3. असली मैसेज भेजें
+    # 3. मैसेज भेजें
     url = f"https://graph.facebook.com/v25.0/me/messages?access_token={page_token}"
     payload = {"recipient": {"id": recipient_id}, "message": {"text": message_text}}
     headers = {"Content-Type": "application/json"}
@@ -65,7 +72,7 @@ def send_instagram_reply(recipient_id, message_text):
     except Exception as e:
         logging.error(f"Instagram Reply Error: {e}")
         
-    # 4. 'Typing...' बंद करें
+    # 4. टाइपिंग बंद करें
     send_typing_indicator(recipient_id, "typing_off")
 
 def send_instagram_voice(recipient_id, audio_file_path):
@@ -101,6 +108,9 @@ def webhook():
                     message_text = messaging.get("message", {}).get("text")
                     
                     if sender_id and message_text and not messaging.get("message", {}).get("is_echo"):
+                        # 1. मैसेज मिलते ही सबसे पहले 'Seen' स्टेटस दिखाएं
+                        mark_message_seen(str(sender_id))
+                        
                         update_memory(str(sender_id), message_text)
                         
                         async def fetch_and_reply():
@@ -110,6 +120,7 @@ def webhook():
                             
                             if "voice" in message_text.lower() or "audio" in message_text.lower():
                                 try:
+                                    # आवाज बदलने के लिए ELEVEN_LABS_VOICE_ID काम करेगा
                                     audio = eleven_client.text_to_speech.convert(
                                         text=ai_reply, 
                                         voice_id=VOICE_ID, 
@@ -140,7 +151,7 @@ def run_flask():
 load_dotenv()
 groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
 eleven_client = ElevenLabs(api_key=os.environ.get("ELEVENLABS_API_KEY"))
-VOICE_ID = os.environ.get("ELEVEN_LABS_VOICE_ID")
+VOICE_ID = os.environ.get("ELEVEN_LABS_VOICE_ID") # यहाँ आपकी नई ElevenLabs Voice ID ले रहा है
 RENDER_SERVER_URL = "https://my-youtube-api-1uf5.onrender.com"
 
 # --- MEMORY ENGINE ---
@@ -244,7 +255,6 @@ async def voice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text("Voice generate nahi ho payi, sorry baby!")
 
-# --- AI & SHORT HUMAN-LIKE TEXTING ENGINE ---
 async def get_ai_response(user_id, user_text):
     count, memories = get_data(user_id)
     if count < 50: mode = "Normal, friendly and caring boyfriend"
@@ -263,7 +273,7 @@ async def get_ai_response(user_id, user_text):
     response = await groq_client.chat.completions.create(
         messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}],
         model="llama-3.3-70b-versatile",
-        max_tokens=60  # छोटे जवाब सुनिश्चित करने के लिए टोकन लिमिट सेट की गई है
+        max_tokens=60
     )
     return response.choices[0].message.content
 
@@ -271,11 +281,8 @@ async def handle_message(update: Update, update_context: ContextTypes.DEFAULT_TY
     user_id = str(update.effective_chat.id)
     update_memory(user_id, update.message.text)
     await update_context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
-    
-    # Telegram पर भी हल्का इंसानी डिले जोड़ दिया है
     delay = min(max(len(update.message.text) * 0.05, 1), 3)
     time.sleep(delay)
-    
     raw_reply = await get_ai_response(user_id, update.message.text)
     cleaned = clean_text_for_speech(raw_reply)
     reply = humanize_text(cleaned)
@@ -288,8 +295,8 @@ if __name__ == '__main__':
     app_bot.add_handler(CommandHandler("search", search_youtube)) 
     app_bot.add_handler(CommandHandler("voice", voice_command))
     app_bot.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-    app_bot.add_handler(CallbackQueryHandler(button_callback))
+    app_bot.add_handler(CallbackQueryGraph(button_callback) if 'CallbackQueryGraph' in globals() else CallbackQueryHandler(button_callback))
     app_bot.add_error_handler(error_handler)
-    print("Fenix is running with full human touch and typing indicators!")
+    print("Fenix is running with Seen Status, Typing and New Voice Support!")
     app_bot.run_polling()
-    
+                                    
