@@ -14,7 +14,7 @@ app = Flask(__name__)
 @app.route('/')
 def home(): return "Fenix is Alive!"
 
-# --- INSTAGRAM REPLY HELPER ---
+# --- INSTAGRAM REPLY HELPERS ---
 def send_instagram_reply(recipient_id, message_text):
     page_token = os.environ.get("FB_PAGE_ACCESS_TOKEN")
     if not page_token:
@@ -32,6 +32,30 @@ def send_instagram_reply(recipient_id, message_text):
             logging.error(f"Failed to send Instagram reply: {response.text}")
     except Exception as e:
         logging.error(f"Instagram Reply Error: {e}")
+
+def send_instagram_voice(recipient_id, audio_file_path):
+    page_token = os.environ.get("FB_PAGE_ACCESS_TOKEN")
+    if not page_token:
+        logging.error("FB_PAGE_ACCESS_TOKEN is missing!")
+        return
+        
+    url = f"https://graph.facebook.com/v25.0/me/messages?access_token={page_token}"
+    try:
+        with open(audio_file_path, 'rb') as audio_file:
+            payload = {
+                'recipient': f'{{"id":"{recipient_id}"}}',
+                'message': '{"attachment":{"type":"audio", "payload":{}}}'
+            }
+            files = {
+                'file': ('voice.mp3', audio_file, 'audio/mpeg')
+            }
+            response = requests.post(url, data=payload, files=files, timeout=30)
+            if response.status_code != 200:
+                logging.error(f"Failed to send Instagram voice: {response.text}")
+            else:
+                logging.info("Instagram voice message sent successfully!")
+    except Exception as e:
+        logging.error(f"Instagram Voice Error: {e}")
 
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
@@ -68,6 +92,18 @@ def webhook():
                         # Generate AI reply synchronously or using a thread since Flask is sync here
                         async def fetch_and_reply():
                             ai_reply = await get_ai_response(str(sender_id), message_text)
+                            
+                            # यदि यूजर ने टेक्स्ट में voice या audio कहा है, तो वॉइस नोट भेजें, अन्यथा टेक्स्ट
+                            if "voice" in message_text.lower() or "audio" in message_text.lower():
+                                try:
+                                    audio = eleven_client.text_to_speech.convert(text=ai_reply, voice_id=VOICE_ID, model_id="eleven_multilingual_v2")
+                                    with open("/tmp/r_insta.mp3", "wb") as f:
+                                        for chunk in audio: f.write(chunk)
+                                    send_instagram_voice(sender_id, "/tmp/r_insta.mp3")
+                                    return
+                                except Exception as ex:
+                                    logging.error(f"Insta Voice Gen Error: {ex}")
+                                    
                             send_instagram_reply(sender_id, ai_reply)
                         
                         threading.Thread(target=lambda: asyncio.run(fetch_and_reply()), daemon=True).start()
@@ -296,4 +332,4 @@ if __name__ == '__main__':
     
     print("Fenix is running flawlessly and cleanly!")
     app_bot.run_polling()
-                    
+    
