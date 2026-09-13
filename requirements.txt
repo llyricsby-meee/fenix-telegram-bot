@@ -1,7 +1,8 @@
 flask
 python-dotenv
-elevenlabs
+python-telegram-bot
 groq
+elevenlabs
+libsql-client
 requests
 yt-dlp
-python-telegram-bot
