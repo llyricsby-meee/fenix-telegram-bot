@@ -214,11 +214,19 @@ telegram_app = None
 
 async def post_init(application):
     commands = [BotCommand("search", "यूट्यूब से गाने और वीडियो खोजें 🔍"), BotCommand("voice", "Fenix की आवाज में जवाब सुनें 🎙️")]
-    try: await application.bot.set_my_commands(commands)
-    except: pass
+    try: 
+        await application.bot.set_my_commands(commands)
+    except: 
+        pass
+    
+    # Webhook set karne ka sahi tarika (event loop ke andar)
+    render_domain = os.environ.get("RENDER_EXTERNAL_URL")
+    if render_domain:
+        webhook_url = f"{render_domain}/telegram_webhook"
+        await application.bot.set_webhook(webhook_url)
+        logging.info(f"Telegram Webhook set to: {webhook_url}")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # अब ये असल एरर दिखाएगा ताकि पता चले कि दिक्कत कहाँ है!
     err_msg = str(context.error)
     logging.error(f"Telegram Error: {err_msg}")
     if update and update.effective_message:
@@ -346,18 +354,11 @@ def init_telegram_bot():
     telegram_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     telegram_app.add_handler(CallbackQueryHandler(button_callback))
     telegram_app.add_error_handler(error_handler)
-    
-    # Auto-set Telegram Webhook using Render URL
-    # Replace 'my-youtube-api-1uf5.onrender.com' with your actual Render URL or set WEBHOOK_URL env
-    render_domain = os.environ.get("RENDER_EXTERNAL_URL")
-    if render_domain:
-        webhook_url = f"{render_domain}/telegram_webhook"
-        asyncio.get_event_loop().run_until_complete(telegram_app.bot.set_webhook(webhook_url))
-        logging.info(f"Telegram Webhook set to: {webhook_url}")
+    # Purana get_event_loop() wala code yahan se hata diya hai
 
 if __name__ == '__main__':
     init_db()
     init_telegram_bot()
     print("Fenix Unified Webhook Server is running!")
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
-            
+    
