@@ -447,4 +447,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         fetch_data = response.json()
         if fetch_data.get("status") == "success" and fetch_data.get("download_url"):
             dl_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Click Here to Download", url=fetch_data.get("download_url"))]])
-            await query.message.edit_text(f"✅ *Link Taiyar Hai!*\n\n🎵 *Title:* {fetch_data.get('titl
+            title_text = fetch_data.get('title', 'Video')
+            await query.message.edit_text(
+    
