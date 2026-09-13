@@ -22,6 +22,63 @@ TURSO_AUTH_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
 def get_turso_client():
     return libsql_client.create_client(url=TURSO_DATABASE_URL, auth_token=TURSO_AUTH_TOKEN)
 
+# --- MEMORY ENGINE (Turso Cloud Database - ASYNC FIXED) ---
+async def init_db_async():
+    try:
+        client = get_turso_client()
+        await client.execute('''CREATE TABLE IF NOT EXISTS memory (user_id TEXT PRIMARY KEY, count INTEGER, context TEXT)''')
+        await client.close()
+    except Exception as e:
+        logging.error(f"Init DB async error: {e}")
+
+def init_db():
+    try:
+        asyncio.run(init_db_async())
+    except Exception as e:
+        logging.error(f"Init DB error: {e}")
+
+async def get_data_async(user_id):
+    try:
+        client = get_turso_client()
+        rs = await client.execute("SELECT count, context FROM memory WHERE user_id = ?", [user_id])
+        await client.close()
+        if rs.rows:
+            return rs.rows[0][0], rs.rows[0][1]
+        return 0, ""
+    except Exception as e:
+        logging.error(f"Get data error: {e}")
+        return 0, ""
+
+def get_data(user_id):
+    try:
+        return asyncio.run(get_data_async(user_id))
+    except Exception as e:
+        logging.error(f"Get data sync error: {e}")
+        return 0, ""
+
+async def update_memory_async(user_id, text):
+    try:
+        count, context = await get_data_async(user_id)
+        new_count = count + 1
+        new_context = f"{context} {text}"[-2000:] 
+        client = get_turso_client()
+        await client.execute(
+            "INSERT INTO memory (user_id, count, context) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET count=excluded.count, context=excluded.context",
+            [user_id, new_count, new_context]
+        )
+        await client.close()
+        return new_count
+    except Exception as e:
+        logging.error(f"Update memory error: {e}")
+        return 0
+
+def update_memory(user_id, text):
+    try:
+        return asyncio.run(update_memory_async(user_id, text))
+    except Exception as e:
+        logging.error(f"Update memory sync error: {e}")
+        return 0
+
 # --- TEXT CLEANER & HUMANIZER ---
 def clean_text_for_speech(text):
     if not text: return ""
@@ -172,43 +229,6 @@ eleven_client = ElevenLabs(api_key=os.environ.get("ELEVENLABS_API_KEY"))
 VOICE_ID = os.environ.get("ELEVEN_LABS_VOICE_ID")
 RENDER_SERVER_URL = "https://my-youtube-api-1uf5.onrender.com"
 
-# --- MEMORY ENGINE (Turso Cloud Database) ---
-def init_db():
-    try:
-        client = get_turso_client()
-        client.execute('''CREATE TABLE IF NOT EXISTS memory (user_id TEXT PRIMARY KEY, count INTEGER, context TEXT)''')
-        client.close()
-    except Exception as e:
-        logging.error(f"Init DB error: {e}")
-
-def get_data(user_id):
-    try:
-        client = get_turso_client()
-        rs = client.execute("SELECT count, context FROM memory WHERE user_id = ?", [user_id])
-        client.close()
-        if rs.rows:
-            return rs.rows[0][0], rs.rows[0]
-        return 0, ""
-    except Exception as e:
-        logging.error(f"Get data error: {e}")
-        return 0, ""
-
-def update_memory(user_id, text):
-    try:
-        count, context = get_data(user_id)
-        new_count = count + 1
-        new_context = f"{context} {text}"[-2000:] 
-        client = get_turso_client()
-        client.execute(
-            "INSERT INTO memory (user_id, count, context) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET count=excluded.count, context=excluded.context",
-            [user_id, new_count, new_context]
-        )
-        client.close()
-        return new_count
-    except Exception as e:
-        logging.error(f"Update memory error: {e}")
-        return 0
-
 # --- TELEGRAM BOT LOGIC ---
 telegram_app = None
 
@@ -219,7 +239,6 @@ async def post_init(application):
     except: 
         pass
     
-    # Webhook set karne ka sahi tarika (event loop ke andar)
     render_domain = os.environ.get("RENDER_EXTERNAL_URL")
     if render_domain:
         webhook_url = f"{render_domain}/telegram_webhook"
@@ -264,7 +283,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except: pass
     data = query.data
     if not data or not data.startswith("yt_"): return
-    video_id = data.split("_")
+    video_id = data.split("_")[1]
     try: await query.message.edit_text("📥 Baby, aapki link process ho rahi hai... Wait karo! 🥰")
     except: pass
     try:
@@ -304,7 +323,7 @@ async def voice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except: pass
 
 async def get_ai_response(user_id, user_text):
-    count, memories = get_data(user_id)
+    count, memories = await get_data_async(user_id)
     if count < 50: mode = "Normal, friendly and caring boyfriend"
     elif count < 150: mode = "Charming, sweet and romantic boyfriend"
     else: mode = "Very flirty, playful, romantic and possessive boyfriend"
@@ -327,7 +346,7 @@ async def get_ai_response(user_id, user_text):
 
 async def handle_message(update: Update, update_context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_chat.id)
-    update_memory(user_id, update.message.text)
+    await update_memory_async(user_id, update.message.text)
     await update_context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
     delay = min(max(len(update.message.text) * 0.05, 1), 3)
     await asyncio.sleep(delay)
@@ -354,7 +373,6 @@ def init_telegram_bot():
     telegram_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     telegram_app.add_handler(CallbackQueryHandler(button_callback))
     telegram_app.add_error_handler(error_handler)
-    # Purana get_event_loop() wala code yahan se hata diya hai
 
 if __name__ == '__main__':
     init_db()
