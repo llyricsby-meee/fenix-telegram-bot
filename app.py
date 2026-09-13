@@ -298,7 +298,7 @@ async def get_ai_response(user_id, user_text):
     
     response = await groq_client.chat.completions.create(
         messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}],
-        model="llama-3.1-8b-instant",
+                model="llama-3.3-70b-versatile",
         max_tokens=60
     )
     return response.choices[0].message.content
