@@ -1,10 +1,11 @@
-import os, logging, sqlite3, asyncio, requests, threading, subprocess, re, time, random
+import os, logging, asyncio, requests, threading, subprocess, re, time, random, uuid
 from flask import Flask, request
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, CommandHandler, CallbackQueryHandler, filters
 from groq import AsyncGroq
 from elevenlabs.client import ElevenLabs
+import libsql_client
 
 # --- LOGGING ---
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -13,6 +14,13 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 app = Flask(__name__)
 @app.route('/')
 def home(): return "Fenix is Alive!"
+
+# --- TURSO DATABASE CONFIG (Environment Variables) ---
+TURSO_DATABASE_URL = os.environ.get("TURSO_DATABASE_URL")
+TURSO_AUTH_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
+
+def get_turso_client():
+    return libsql_client.create_client(url=TURSO_DATABASE_URL, auth_token=TURSO_AUTH_TOKEN)
 
 # --- TEXT CLEANER & HUMANIZER ---
 def clean_text_for_speech(text):
@@ -72,7 +80,7 @@ def send_instagram_reply(recipient_id, message_text, is_group=False):
         if response.status_code != 200:
              logging.error(f"Instagram Reply Error: {response.text}")
     except Exception as e:
-        logging.error(f"Instagram Reply Exception: {e})"
+        logging.error(f"Instagram Reply Exception: {e}")
         
     send_typing_indicator(recipient_id, "typing_off")
 
@@ -108,7 +116,7 @@ def webhook():
         if data.get("object") == "instagram":
             for entry in data.get("entry", []):
                 for messaging in entry.get("messaging", []):
-                    sender_id = messaging.get("sender", {}).get("id")
+                    sender_id = str(messaging.get("sender", {}).get("id"))
                     message_text = messaging.get("message", {}).get("text")
                     bot_username = os.environ.get("INSTAGRAM_USERNAME", "really_innocent_.nawab").lower()
                     
@@ -117,24 +125,25 @@ def webhook():
                         if is_mention:
                              message_text = re.sub(rf'@{bot_username}', '', message_text, flags=re.IGNORECASE).strip()
                         
-                        mark_message_seen(str(sender_id))
+                        mark_message_seen(sender_id)
                         time.sleep(0.5)
-                        update_memory(str(sender_id), message_text)
+                        update_memory(sender_id, message_text)
                         
                         async def fetch_and_reply():
-                            raw_ai_reply = await get_ai_response(str(sender_id), message_text)
+                            raw_ai_reply = await get_ai_response(sender_id, message_text)
                             cleaned = clean_text_for_speech(raw_ai_reply)
                             ai_reply = humanize_text(cleaned)
                             
                             if "voice" in message_text.lower() or "audio" in message_text.lower():
+                                unique_id = uuid.uuid4().hex
+                                mp3_path = f"/tmp/r_insta_{unique_id}.mp3"
+                                m4a_path = f"/tmp/r_insta_{unique_id}.m4a"
                                 try:
                                     audio = eleven_client.text_to_speech.convert(
                                         text=ai_reply, 
                                         voice_id=VOICE_ID, 
                                         model_id="eleven_multilingual_v2"
                                     )
-                                    mp3_path = "/tmp/r_insta.mp3"
-                                    m4a_path = "/tmp/r_insta.m4a"
                                     with open(mp3_path, "wb") as f:
                                         for chunk in audio: f.write(chunk)
                                     subprocess.run(["ffmpeg", "-y", "-i", mp3_path, "-c:a", "aac", m4a_path], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -142,6 +151,11 @@ def webhook():
                                     return
                                 except Exception as ex:
                                     logging.error(f"Insta Voice Gen Error: {ex}")
+                                finally:
+                                    for p in [mp3_path, m4a_path]:
+                                        if os.path.exists(p):
+                                            try: os.remove(p)
+                                            except: pass
                                     
                             send_instagram_reply(sender_id, ai_reply, is_group=is_mention)
                         
@@ -161,34 +175,42 @@ eleven_client = ElevenLabs(api_key=os.environ.get("ELEVENLABS_API_KEY"))
 VOICE_ID = os.environ.get("ELEVEN_LABS_VOICE_ID")
 RENDER_SERVER_URL = "https://my-youtube-api-1uf5.onrender.com"
 
-# --- MEMORY ENGINE ---
+# --- MEMORY ENGINE (Turso Cloud Database) ---
 def init_db():
-    conn = sqlite3.connect('/tmp/fenix.db', timeout=10)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS memory (user_id TEXT PRIMARY KEY, count INTEGER, context TEXT)''')
-    conn.commit(); conn.close()
+    try:
+        client = get_turso_client()
+        client.execute('''CREATE TABLE IF NOT EXISTS memory (user_id TEXT PRIMARY KEY, count INTEGER, context TEXT)''')
+        client.close()
+    except Exception as e:
+        logging.error(f"Init DB error: {e}")
 
 def get_data(user_id):
     try:
-        conn = sqlite3.connect('/tmp/fenix.db', timeout=10)
-        c = conn.cursor()
-        c.execute("SELECT count, context FROM memory WHERE user_id=?", (user_id,))
-        row = c.fetchone()
-        conn.close()
-        return row if row else (0, "")
-    except: return (0, "")
+        client = get_turso_client()
+        rs = client.execute("SELECT count, context FROM memory WHERE user_id = ?", [user_id])
+        client.close()
+        if rs.rows:
+            return rs.rows[0][0], rs.rows[0]
+        return 0, ""
+    except Exception as e:
+        logging.error(f"Get data error: {e}")
+        return 0, ""
 
 def update_memory(user_id, text):
     try:
         count, context = get_data(user_id)
         new_count = count + 1
         new_context = f"{context} {text}"[-2000:] 
-        conn = sqlite3.connect('/tmp/fenix.db', timeout=10)
-        c = conn.cursor()
-        c.execute("REPLACE INTO memory VALUES (?, ?, ?)", (user_id, new_count, new_context))
-        conn.commit(); conn.close()
+        client = get_turso_client()
+        client.execute(
+            "INSERT INTO memory (user_id, count, context) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET count=excluded.count, context=excluded.context",
+            [user_id, new_count, new_context]
+        )
+        client.close()
         return new_count
-    except: return 0
+    except Exception as e:
+        logging.error(f"Update memory error: {e}")
+        return 0
 
 # --- AUTOMATIC COMMANDS MENU ---
 async def post_init(application):
@@ -210,7 +232,7 @@ async def search_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response = requests.get(f"{RENDER_SERVER_URL}/search?query={query}", timeout=45)
         data = response.json()
         if data.get("status") != "success" or not data.get("results"):
-            await msg.edit_text("Baby, YouTube par is naam से kuch nahi mila! 💔")
+            await msg.edit_text("Baby, YouTube par is naam se kuch nahi mila! 💔")
             return
         text = f"🚀 *YouTube Search Results:*\n`{query}`\n\n"
         keyboard = []
@@ -230,7 +252,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except: pass
     data = query.data
     if not data or not data.startswith("yt_"): return
-    video_id = data.split("_")[1]
+    video_id = data.split("_")
     try: await query.message.edit_text("📥 Baby, aapki link process ho rahi hai... Wait karo! 🥰")
     except: pass
     try:
@@ -245,6 +267,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text("Baby, link fetch karne mein error aayi! 💔")
 
 async def voice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    unique_id = uuid.uuid4().hex
+    mp3_path = f"/tmp/r_{unique_id}.mp3"
     try:
         user_text = " ".join(context.args)
         if not user_text:
@@ -255,12 +279,17 @@ async def voice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cleaned = clean_text_for_speech(raw_reply)
         reply = humanize_text(cleaned)
         audio = eleven_client.text_to_speech.convert(text=reply, voice_id=VOICE_ID, model_id="eleven_multilingual_v2")
-        with open("/tmp/r.mp3", "wb") as f:
+        with open(mp3_path, "wb") as f:
             for chunk in audio: f.write(chunk)
-        with open("/tmp/r.mp3", "rb") as voice_file:
+        with open(mp3_path, "rb") as voice_file:
             await update.message.reply_voice(voice=voice_file)
     except Exception as e:
+        logging.error(f"Voice Command Error: {e}")
         await update.message.reply_text("Voice generate nahi ho payi, sorry baby!")
+    finally:
+        if os.path.exists(mp3_path):
+            try: os.remove(mp3_path)
+            except: pass
 
 async def get_ai_response(user_id, user_text):
     count, memories = get_data(user_id)
@@ -289,7 +318,7 @@ async def handle_message(update: Update, update_context: ContextTypes.DEFAULT_TY
     update_memory(user_id, update.message.text)
     await update_context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
     delay = min(max(len(update.message.text) * 0.05, 1), 3)
-    await asyncio.sleep(delay)  # Fixed: time.sleep ki jagah async sleep
+    await asyncio.sleep(delay)
     raw_reply = await get_ai_response(user_id, update.message.text)
     cleaned = clean_text_for_speech(raw_reply)
     reply = humanize_text(cleaned)
@@ -304,6 +333,6 @@ if __name__ == '__main__':
     app_bot.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     app_bot.add_handler(CallbackQueryHandler(button_callback))
     app_bot.add_error_handler(error_handler)
-    print("Fenix is running smoothly with Group Chat Mention Support!")
+    print("Fenix is running smoothly with Turso Cloud Database!")
     app_bot.run_polling()
-                            
+                    
