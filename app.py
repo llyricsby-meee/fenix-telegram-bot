@@ -322,11 +322,7 @@ def webhook():
                                 mp3_path = f"/tmp/r_insta_{unique_id}.mp3"
                                 m4a_path = f"/tmp/r_insta_{unique_id}.m4a"
                                 try:
-                                    audio = eleven_client.text_to_speech.convert(
-                                        text=ai_reply, 
-                                        voice_id=VOICE_ID, 
-                                        model_id="eleven_multilingual_v2"
-                                    )
+                                    audio = eleven_client.text_to_speech.convert(text=ai_reply, voice_id=VOICE_ID, model_id="eleven_multilingual_v2")
                                     with open(mp3_path, "wb") as f:
                                         for chunk in audio:
                                             f.write(chunk)
@@ -356,6 +352,31 @@ groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
 eleven_client = ElevenLabs(api_key=os.environ.get("ELEVENLABS_API_KEY"))
 VOICE_ID = os.environ.get("ELEVEN_LABS_VOICE_ID")
 RENDER_SERVER_URL = "https://my-youtube-api-1uf5.onrender.com"
+
+async def get_ai_response(user_id, user_text):
+    count, memories = await get_data_async(user_id)
+    if count < 50:
+        mode = "Normal, friendly and caring boyfriend"
+    elif count < 150:
+        mode = "Charming, sweet and romantic boyfriend"
+    else:
+        mode = "Very flirty, playful, romantic and possessive boyfriend"
+    
+    system_prompt = (
+        f"You are Fenix, a human boyfriend chatting on Instagram/WhatsApp. {mode}. Memory: {memories}\n\n"
+        "CRITICAL RULES FOR TEXTING:\n"
+        "1. Write EXTREMELY short replies like real humans text on chat. Line max 1-2.\n"
+        "2. Speak ONLY in casual, natural Hinglish (Roman Hindi script, lowercase style).\n"
+        "3. NEVER write long paragraphs or robot-like explanations.\n"
+        "4. NO stage directions, actions, or feelings in asterisks/brackets."
+    )
+    
+    response = await groq_client.chat.completions.create(
+        messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}],
+        model="llama-3.3-70b-versatile",
+        max_tokens=60
+    )
+    return response.choices[0].message.content
 
 # --- TELEGRAM BOT INTEGRATION ---
 telegram_app = None
@@ -426,22 +447,4 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         fetch_data = response.json()
         if fetch_data.get("status") == "success" and fetch_data.get("download_url"):
             dl_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Click Here to Download", url=fetch_data.get("download_url"))]])
-            await query.message.edit_text(f"✅ *Link Taiyar Hai!*\n\n🎵 *Title:* {fetch_data.get('title', 'Video')}\n👇", reply_markup=dl_markup, parse_mode='Markdown')
-            return
-        await query.message.edit_text("Baby, download fail ho gaya! 💔")
-    except Exception as e:
-        await query.message.edit_text(f"Baby, error: {e}")
-
-async def voice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    unique_id = uuid.uuid4().hex
-    mp3_path = f"/tmp/r_{unique_id}.mp3"
-    try:
-        user_text = " ".join(context.args)
-        if not user_text:
-            await update.message.reply_text("Baby, kuch toh bolo! `/voice [tumhara sawal]`")
-            return
-        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='record_voice')
-        raw_reply = await get_ai_response(str(update.effective_chat.id), user_text)
-        cleaned = clean_text_for_speech(raw_reply)
-        reply = humanize_text(cleaned)
-        audio = eleven_client.text_to_speech.convert(text=reply, voice_id=VOICE_ID, model_id="eleven_multiling
+            await query.message.edit_text(f"✅ *Link Taiyar Hai!*\n\n🎵 *Title:* {fetch_data.get('titl
