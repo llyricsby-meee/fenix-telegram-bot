@@ -1,4 +1,13 @@
-import os, logging, asyncio, requests, threading, subprocess, re, time, random, uuid
+import os
+import logging
+import asyncio
+import requests
+import threading
+import subprocess
+import re
+import time
+import random
+import uuid
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
@@ -13,7 +22,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 load_dotenv()
 app = Flask(__name__)
 
-# --- SAFE ASYNC RUNNER (Fixes "No running event loop" & Loop Errors) ---
+# --- SAFE ASYNC RUNNER ---
 def run_async_safe(coro):
     try:
         return asyncio.run(coro)
@@ -25,21 +34,21 @@ def run_async_safe(coro):
         finally:
             loop.close()
 
-# --- TURSO DATABASE CONFIG & AUTO-FIX ---
+# --- TURSO DATABASE CONFIG ---
 TURSO_DATABASE_URL = os.environ.get("TURSO_DATABASE_URL", "")
 TURSO_AUTH_TOKEN = os.environ.get("TURSO_AUTH_TOKEN", "")
 
 def get_turso_client():
     url = TURSO_DATABASE_URL or ""
-    # Auto-fix wss:// to libsql:// to prevent Error 400
     if url.startswith("wss://"):
         url = url.replace("wss://", "libsql://", 1)
     return libsql_client.create_client(url=url, auth_token=TURSO_AUTH_TOKEN)
 
-# --- MEMORY ENGINE (Turso Cloud Database) ---
+# --- MEMORY ENGINE ---
 async def init_db_async():
     try:
-        if not TURSO_DATABASE_URL: return
+        if not TURSO_DATABASE_URL:
+            return
         client = get_turso_client()
         await client.execute('''CREATE TABLE IF NOT EXISTS memory (user_id TEXT PRIMARY KEY, count INTEGER, context TEXT)''')
         await client.close()
@@ -54,7 +63,8 @@ def init_db():
 
 async def get_data_async(user_id):
     try:
-        if not TURSO_DATABASE_URL: return 0, ""
+        if not TURSO_DATABASE_URL:
+            return 0, ""
         client = get_turso_client()
         rs = await client.execute("SELECT count, context FROM memory WHERE user_id = ?", [user_id])
         await client.close()
@@ -74,7 +84,8 @@ def get_data(user_id):
 
 async def update_memory_async(user_id, text):
     try:
-        if not TURSO_DATABASE_URL: return 0
+        if not TURSO_DATABASE_URL:
+            return 0
         count, context = await get_data_async(user_id)
         new_count = count + 1
         new_context = f"{context} {text}"[-2000:] 
@@ -171,7 +182,12 @@ def home():
 
 @app.route('/web_api', methods=['GET', 'POST'])
 def web_api():
-    user_text = request.args.get('text') if request.method == 'GET' else (request.get_json(silent=True) or {}).get('text')
+    if request.method == 'GET':
+        user_text = request.args.get('text')
+    else:
+        data = request.get_json(silent=True) or {}
+        user_text = data.get('text')
+
     if not user_text:
         return jsonify({"reply": "Kuch toh type karo baby! ❤️"})
     
@@ -188,7 +204,8 @@ def web_api():
 
 # --- TEXT CLEANER & HUMANIZER ---
 def clean_text_for_speech(text):
-    if not text: return ""
+    if not text:
+        return ""
     cleaned = re.sub(r'\*.*?\*', '', text)
     cleaned = re.sub(r'\(.*?\)', '', cleaned)
     cleaned = re.sub(r'\[.*?\]', '', cleaned)
@@ -197,7 +214,8 @@ def clean_text_for_speech(text):
     return cleaned
 
 def humanize_text(text):
-    if not text: return text
+    if not text:
+        return text
     slangs = ["kyaa", "acha", "bta", "sachii", "umm...", "hehe", "haan", "na"]
     if random.random() > 0.6 and not text.endswith("..."):
         text = text + " ..."
@@ -208,23 +226,30 @@ def humanize_text(text):
 # --- INSTAGRAM INTEGRATION ---
 def mark_message_seen(recipient_id):
     page_token = os.environ.get("FB_PAGE_ACCESS_TOKEN")
-    if not page_token: return
+    if not page_token:
+        return
     url = f"https://graph.facebook.com/v25.0/me/messages?access_token={page_token}"
     payload = {"recipient": {"id": recipient_id}, "sender_action": "mark_seen"}
-    try: requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=5)
-    except: pass
+    try:
+        requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=5)
+    except Exception:
+        pass
 
 def send_typing_indicator(recipient_id, action="typing_on"):
     page_token = os.environ.get("FB_PAGE_ACCESS_TOKEN")
-    if not page_token: return
+    if not page_token:
+        return
     url = f"https://graph.facebook.com/v25.0/me/messages?access_token={page_token}"
     payload = {"recipient": {"id": recipient_id}, "sender_action": action}
-    try: requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=5)
-    except: pass
+    try:
+        requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=5)
+    except Exception:
+        pass
 
 def send_instagram_reply(recipient_id, message_text, is_group=False):
     page_token = os.environ.get("FB_PAGE_ACCESS_TOKEN")
-    if not page_token: return
+    if not page_token:
+        return
     
     send_typing_indicator(recipient_id, "typing_on")
     delay = min(max(len(message_text) * 0.05, 1), 3)
@@ -235,7 +260,7 @@ def send_instagram_reply(recipient_id, message_text, is_group=False):
     try: 
         response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=10)
         if response.status_code != 200:
-             logging.error(f"Instagram Reply Error: {response.text}")
+            logging.error(f"Instagram Reply Error: {response.text}")
     except Exception as e:
         logging.error(f"Instagram Reply Exception: {e}")
         
@@ -243,7 +268,8 @@ def send_instagram_reply(recipient_id, message_text, is_group=False):
 
 def send_instagram_voice(recipient_id, audio_file_path):
     page_token = os.environ.get("FB_PAGE_ACCESS_TOKEN")
-    if not page_token: return
+    if not page_token:
+        return
     url = f"https://graph.facebook.com/v25.0/me/messages?access_token={page_token}"
     try:
         with open(audio_file_path, 'rb') as audio_file:
@@ -266,7 +292,8 @@ def webhook():
         return "Forbidden", 403
         
     data = request.get_json(silent=True)
-    if not data: return "OK", 200
+    if not data:
+        return "OK", 200
 
     try:
         if data.get("object") == "instagram":
@@ -279,7 +306,7 @@ def webhook():
                     if sender_id and message_text and not messaging.get("message", {}).get("is_echo"):
                         is_mention = f"@{bot_username}" in message_text.lower()
                         if is_mention:
-                             message_text = re.sub(rf'@{bot_username}', '', message_text, flags=re.IGNORECASE).strip()
+                            message_text = re.sub(rf'@{bot_username}', '', message_text, flags=re.IGNORECASE).strip()
                         
                         mark_message_seen(sender_id)
                         time.sleep(0.5)
@@ -301,7 +328,8 @@ def webhook():
                                         model_id="eleven_multilingual_v2"
                                     )
                                     with open(mp3_path, "wb") as f:
-                                        for chunk in audio: f.write(chunk)
+                                        for chunk in audio:
+                                            f.write(chunk)
                                     subprocess.run(["ffmpeg", "-y", "-i", mp3_path, "-c:a", "aac", m4a_path], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                                     send_instagram_voice(sender_id, m4a_path)
                                     return
@@ -310,8 +338,10 @@ def webhook():
                                 finally:
                                     for p in [mp3_path, m4a_path]:
                                         if os.path.exists(p):
-                                            try: os.remove(p)
-                                            except: pass
+                                            try:
+                                                os.remove(p)
+                                            except Exception:
+                                                pass
                                     
                             send_instagram_reply(sender_id, ai_reply, is_group=is_mention)
                         
@@ -332,8 +362,10 @@ telegram_app = None
 
 async def post_init(application):
     commands = [BotCommand("search", "यूट्यूब से गाने और वीडियो खोजें 🔍"), BotCommand("voice", "Fenix की आवाज में जवाब सुनें 🎙️")]
-    try: await application.bot.set_my_commands(commands)
-    except: pass
+    try:
+        await application.bot.set_my_commands(commands)
+    except Exception:
+        pass
     
     render_domain = os.environ.get("RENDER_EXTERNAL_URL")
     if render_domain:
@@ -345,8 +377,10 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     err_msg = str(context.error)
     logging.error(f"Telegram Error: {err_msg}")
     if update and update.effective_message:
-        try: await update.effective_message.reply_text(f"⚠️ **Real Error Debug:**\n`{err_msg}`", parse_mode='Markdown')
-        except: pass
+        try:
+            await update.effective_message.reply_text(f"⚠️ **Real Error Debug:**\n`{err_msg}`", parse_mode='Markdown')
+        except Exception:
+            pass
 
 async def search_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = " ".join(context.args)
@@ -364,7 +398,8 @@ async def search_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = []
         for index, video in enumerate(data["results"][:10], start=1):
             title, duration_sec, video_id = video.get("title", "Unknown"), video.get("duration", 0), video.get("video_id")
-            if not video_id: continue
+            if not video_id:
+                continue
             duration = f"{int(duration_sec) // 60}:{int(duration_sec) % 60:02d}" if duration_sec else "0:00"
             text += f"{index}. *{title[:50]}* [{duration}]\n\n"
             keyboard.append([InlineKeyboardButton(f"🎬 {index}. Download Link", callback_data=f"yt_{video_id[:40]}")])
@@ -374,13 +409,18 @@ async def search_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    try: await query.answer()
-    except: pass
+    try:
+        await query.answer()
+    except Exception:
+        pass
     data = query.data
-    if not data or not data.startswith("yt_"): return
+    if not data or not data.startswith("yt_"):
+        return
     video_id = data.split("_")[1]
-    try: await query.message.edit_text("📥 Baby, aapki link process ho rahi hai... Wait karo! 🥰")
-    except: pass
+    try:
+        await query.message.edit_text("📥 Baby, aapki link process ho rahi hai... Wait karo! 🥰")
+    except Exception:
+        pass
     try:
         response = requests.get(f"{RENDER_SERVER_URL}/fetch?url=https://www.youtube.com/watch?v={video_id}", timeout=120)
         fetch_data = response.json()
@@ -404,14 +444,4 @@ async def voice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         raw_reply = await get_ai_response(str(update.effective_chat.id), user_text)
         cleaned = clean_text_for_speech(raw_reply)
         reply = humanize_text(cleaned)
-        audio = eleven_client.text_to_speech.convert(text=reply, voice_id=VOICE_ID, model_id="eleven_multilingual_v2")
-        with open(mp3_path, "wb") as f:
-            for chunk in audio: f.write(chunk)
-        with open(mp3_path, "rb") as voice_file:
-            await update.message.reply_voice(voice=voice_file)
-    except Exception as e:
-        logging.error(f"Voice Command Error: {e}")
-        await update.message.reply_text(f"Voice error: {e}")
-    finally:
-        if os.path.exists(mp3_path):
-  
+        audio = eleven_client.text_to_speech.convert(text=reply, voice_id=VOICE_ID, model_id="eleven_multiling
