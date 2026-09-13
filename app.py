@@ -56,17 +56,11 @@ def send_instagram_reply(recipient_id, message_text, is_group=False):
     page_token = os.environ.get("FB_PAGE_ACCESS_TOKEN")
     if not page_token: return
     
-    # Typing indicator
     send_typing_indicator(recipient_id, "typing_on")
-    
-    # Natural delay
     delay = min(max(len(message_text) * 0.05, 1), 3)
     time.sleep(delay)
     
     url = f"https://graph.facebook.com/v25.0/me/messages?access_token={page_token}"
-    
-    # अगर यह ग्रुप मैसेज है, तो 'message_type' को 'RESPONSE' पर सेट करना पड़ सकता है
-    # हालाँकि, Facebook Graph API में recipient.id आमतौर पर ग्रुप थ्रेड ID को भी सपोर्ट करता है।
     payload = {
         "recipient": {"id": recipient_id},
         "message": {"text": message_text}
@@ -78,9 +72,8 @@ def send_instagram_reply(recipient_id, message_text, is_group=False):
         if response.status_code != 200:
              logging.error(f"Instagram Reply Error: {response.text}")
     except Exception as e:
-        logging.error(f"Instagram Reply Exception: {e}")
+        logging.error(f"Instagram Reply Exception: {e})"
         
-    # Typing indicator off
     send_typing_indicator(recipient_id, "typing_off")
 
 def send_instagram_voice(recipient_id, audio_file_path):
@@ -107,36 +100,25 @@ def webhook():
             return challenge, 200
         return "Forbidden", 403
         
-    data = request.json
+    data = request.get_json(silent=True)
+    if not data:
+        return "OK", 200
+
     try:
         if data.get("object") == "instagram":
             for entry in data.get("entry", []):
                 for messaging in entry.get("messaging", []):
-                    # Sender ID और Message Text प्राप्त करें
                     sender_id = messaging.get("sender", {}).get("id")
                     message_text = messaging.get("message", {}).get("text")
-                    
-                    # यह चेक करने के लिए कि क्या यह ग्रुप चैट से आया है या कोई mention है
-                    # (webhook payload में कभी-कभी 'tags' या 'mentions' की जानकारी भी होती है, 
-                    # लेकिन सबसे आसान तरीका है मैसेज टेक्स्ट में अपना @username ढूँढना)
-                    
-                    # अपना Instagram Username यहाँ डालें (बिना @ के)
-                    # आप इसे .env से भी ले सकते हैं, जैसे: os.environ.get("INSTAGRAM_USERNAME")
                     bot_username = os.environ.get("INSTAGRAM_USERNAME", "really_innocent_.nawab").lower()
                     
                     if sender_id and message_text and not messaging.get("message", {}).get("is_echo"):
-                        
-                        # चेक करें कि क्या यह ग्रुप चैट का मैसेज है (अगर मैसेज में @username है)
                         is_mention = f"@{bot_username}" in message_text.lower()
-                        
-                        # अगर मैसेज में @username है, तो उसे हटा दें ताकि AI कन्फ्यूज़ न हो
                         if is_mention:
                              message_text = re.sub(rf'@{bot_username}', '', message_text, flags=re.IGNORECASE).strip()
                         
-                        # Mark Seen
                         mark_message_seen(str(sender_id))
                         time.sleep(0.5)
-                        
                         update_memory(str(sender_id), message_text)
                         
                         async def fetch_and_reply():
@@ -161,7 +143,6 @@ def webhook():
                                 except Exception as ex:
                                     logging.error(f"Insta Voice Gen Error: {ex}")
                                     
-                            # ग्रुप चैट के लिए रिप्लाई (API अपने आप sender_id के आधार पर थ्रेड को पहचान लेती है)
                             send_instagram_reply(sender_id, ai_reply, is_group=is_mention)
                         
                         threading.Thread(target=lambda: asyncio.run(fetch_and_reply()), daemon=True).start()
@@ -182,14 +163,14 @@ RENDER_SERVER_URL = "https://my-youtube-api-1uf5.onrender.com"
 
 # --- MEMORY ENGINE ---
 def init_db():
-    conn = sqlite3.connect('/tmp/fenix.db')
+    conn = sqlite3.connect('/tmp/fenix.db', timeout=10)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS memory (user_id TEXT PRIMARY KEY, count INTEGER, context TEXT)''')
     conn.commit(); conn.close()
 
 def get_data(user_id):
     try:
-        conn = sqlite3.connect('/tmp/fenix.db')
+        conn = sqlite3.connect('/tmp/fenix.db', timeout=10)
         c = conn.cursor()
         c.execute("SELECT count, context FROM memory WHERE user_id=?", (user_id,))
         row = c.fetchone()
@@ -202,7 +183,7 @@ def update_memory(user_id, text):
         count, context = get_data(user_id)
         new_count = count + 1
         new_context = f"{context} {text}"[-2000:] 
-        conn = sqlite3.connect('/tmp/fenix.db')
+        conn = sqlite3.connect('/tmp/fenix.db', timeout=10)
         c = conn.cursor()
         c.execute("REPLACE INTO memory VALUES (?, ?, ?)", (user_id, new_count, new_context))
         conn.commit(); conn.close()
@@ -229,7 +210,7 @@ async def search_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response = requests.get(f"{RENDER_SERVER_URL}/search?query={query}", timeout=45)
         data = response.json()
         if data.get("status") != "success" or not data.get("results"):
-            await msg.edit_text("Baby, YouTube par is naam se kuch nahi mila! 💔")
+            await msg.edit_text("Baby, YouTube par is naam से kuch nahi mila! 💔")
             return
         text = f"🚀 *YouTube Search Results:*\n`{query}`\n\n"
         keyboard = []
@@ -298,7 +279,7 @@ async def get_ai_response(user_id, user_text):
     
     response = await groq_client.chat.completions.create(
         messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}],
-                model="llama-3.3-70b-versatile",
+        model="llama-3.3-70b-versatile",
         max_tokens=60
     )
     return response.choices[0].message.content
@@ -308,7 +289,7 @@ async def handle_message(update: Update, update_context: ContextTypes.DEFAULT_TY
     update_memory(user_id, update.message.text)
     await update_context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
     delay = min(max(len(update.message.text) * 0.05, 1), 3)
-    time.sleep(delay)
+    await asyncio.sleep(delay)  # Fixed: time.sleep ki jagah async sleep
     raw_reply = await get_ai_response(user_id, update.message.text)
     cleaned = clean_text_for_speech(raw_reply)
     reply = humanize_text(cleaned)
@@ -325,4 +306,4 @@ if __name__ == '__main__':
     app_bot.add_error_handler(error_handler)
     print("Fenix is running smoothly with Group Chat Mention Support!")
     app_bot.run_polling()
-                       
+                            
