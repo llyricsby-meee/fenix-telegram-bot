@@ -95,10 +95,175 @@ async def update_memory_async(user_id, text):
             [user_id, new_count, new_context]
         )
         await client.close()
+# --- TURSO DATABASE CONFIG ---
+TURSO_DATABASE_URL = os.environ.get("TURSO_DATABASE_URL", "").strip()
+TURSO_AUTH_TOKEN = os.environ.get("TURSO_AUTH_TOKEN", "").strip()
+
+
+def get_turso_client():
+    """
+    Create a Turso/libSQL client using HTTP transport.
+
+    This avoids the WebSocket/Hrana handshake problem that can happen
+    with regional Turso URLs on libsql-client.
+    """
+    url = TURSO_DATABASE_URL
+
+    if not url:
+        raise RuntimeError("TURSO_DATABASE_URL is not configured")
+
+    # Force HTTP transport instead of WebSocket transport.
+    if url.startswith("libsql://"):
+        url = "https://" + url[len("libsql://"):]
+
+    elif url.startswith("wss://"):
+        url = "https://" + url[len("wss://"):]
+
+    elif url.startswith("ws://"):
+        url = "http://" + url[len("ws://"):]
+
+    return libsql_client.create_client(
+        url=url,
+        auth_token=TURSO_AUTH_TOKEN
+    )
+
+
+# --- MEMORY ENGINE ---
+
+async def init_db_async():
+    client = None
+    try:
+        if not TURSO_DATABASE_URL:
+            logging.warning("TURSO_DATABASE_URL is not configured. Memory disabled.")
+            return
+
+        client = get_turso_client()
+
+        await client.execute("""
+            CREATE TABLE IF NOT EXISTS memory (
+                user_id TEXT PRIMARY KEY,
+                count INTEGER NOT NULL DEFAULT 0,
+                context TEXT NOT NULL DEFAULT ''
+            )
+        """)
+
+        logging.info("Turso memory database initialized successfully.")
+
+    except Exception as e:
+        logging.error(f"Turso init error: {e}")
+
+    finally:
+        if client:
+            try:
+                await client.close()
+            except Exception:
+                pass
+
+
+def init_db():
+    try:
+        run_async_safe(init_db_async())
+    except Exception as e:
+        logging.error(f"Init DB error: {e}")
+
+
+async def get_data_async(user_id):
+    client = None
+
+    try:
+        if not TURSO_DATABASE_URL:
+            return 0, ""
+
+        client = get_turso_client()
+
+        # Make sure the table exists before reading it.
+        await client.execute("""
+            CREATE TABLE IF NOT EXISTS memory (
+                user_id TEXT PRIMARY KEY,
+                count INTEGER NOT NULL DEFAULT 0,
+                context TEXT NOT NULL DEFAULT ''
+            )
+        """)
+
+        rs = await client.execute(
+            "SELECT count, context FROM memory WHERE user_id = ?",
+            [str(user_id)]
+        )
+
+        if rs.rows:
+            count = int(rs.rows[0][0] or 0)
+            context = rs.rows[0][1] or ""
+            return count, context
+
+        return 0, ""
+
+    except Exception as e:
+        logging.error(f"Get data error: {e}")
+        return 0, ""
+
+    finally:
+        if client:
+            try:
+                await client.close()
+            except Exception:
+                pass
+
+
+def get_data(user_id):
+    try:
+        return run_async_safe(get_data_async(user_id))
+    except Exception as e:
+        logging.error(f"Get data sync error: {e}")
+        return 0, ""
+
+
+async def update_memory_async(user_id, text):
+    client = None
+
+    try:
+        if not TURSO_DATABASE_URL:
+            return 0
+
+        count, context = await get_data_async(user_id)
+
+        new_count = count + 1
+        new_context = f"{context} {text}"[-2000:]
+
+        client = get_turso_client()
+
+        await client.execute("""
+            CREATE TABLE IF NOT EXISTS memory (
+                user_id TEXT PRIMARY KEY,
+                count INTEGER NOT NULL DEFAULT 0,
+                context TEXT NOT NULL DEFAULT ''
+            )
+        """)
+
+        await client.execute(
+            """
+            INSERT INTO memory (user_id, count, context)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id)
+            DO UPDATE SET
+                count = excluded.count,
+                context = excluded.context
+            """,
+            [str(user_id), new_count, new_context]
+        )
+
         return new_count
+
     except Exception as e:
         logging.error(f"Update memory error: {e}")
         return 0
+
+    finally:
+        if client:
+            try:
+                await client.close()
+            except Exception:
+                pass
+
 
 def update_memory(user_id, text):
     try:
@@ -106,14 +271,6 @@ def update_memory(user_id, text):
     except Exception as e:
         logging.error(f"Update memory sync error: {e}")
         return 0
-
-# --- WEB UI & TESTING ROUTE ---
-@app.route('/')
-def home():
-    return '''
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Fenix AI Web Tester</title>
