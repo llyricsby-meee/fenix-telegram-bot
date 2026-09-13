@@ -1,8 +1,8 @@
 import os, logging, asyncio, requests, threading, subprocess, re, time, random, uuid
-from flask import Flask, request
+from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
-from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, CommandHandler, CallbackQueryHandler, filters
+from telegram.ext import Application, ContextTypes, MessageHandler, CommandHandler, CallbackQueryHandler, filters
 from groq import AsyncGroq
 from elevenlabs.client import ElevenLabs
 import libsql_client
@@ -13,9 +13,9 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 # --- CONFIG ---
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Fenix is Alive!"
+def home(): return "Fenix is Alive & Webhook Connected!"
 
-# --- TURSO DATABASE CONFIG (Environment Variables) ---
+# --- TURSO DATABASE CONFIG ---
 TURSO_DATABASE_URL = os.environ.get("TURSO_DATABASE_URL")
 TURSO_AUTH_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
 
@@ -98,6 +98,7 @@ def send_instagram_voice(recipient_id, audio_file_path):
     except Exception as e:
         logging.error(f"Instagram Voice Error: {e}")
 
+# --- INSTAGRAM WEBHOOK ---
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
     if request.method == 'GET':
@@ -165,10 +166,6 @@ def webhook():
         
     return "EVENT_RECEIVED", 200
 
-def run_flask(): 
-    try: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
-    except Exception as e: logging.error(f"Flask Server Error: {e}")
-
 load_dotenv()
 groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
 eleven_client = ElevenLabs(api_key=os.environ.get("ELEVENLABS_API_KEY"))
@@ -212,15 +209,22 @@ def update_memory(user_id, text):
         logging.error(f"Update memory error: {e}")
         return 0
 
-# --- AUTOMATIC COMMANDS MENU ---
+# --- TELEGRAM BOT LOGIC ---
+telegram_app = None
+
 async def post_init(application):
     commands = [BotCommand("search", "यूट्यूब से गाने और वीडियो खोजें 🔍"), BotCommand("voice", "Fenix की आवाज में जवाब सुनें 🎙️")]
     try: await application.bot.set_my_commands(commands)
     except: pass
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try: await update.effective_message.reply_text("Baby, connection mein dikkat aayi! ❤️")
-    except: pass
+    # अब ये असल एरर दिखाएगा ताकि पता चले कि दिक्कत कहाँ है!
+    err_msg = str(context.error)
+    logging.error(f"Telegram Error: {err_msg}")
+    if update and update.effective_message:
+        try: 
+            await update.effective_message.reply_text(f"⚠️ **Real Error Debug:**\n`{err_msg}`", parse_mode='Markdown')
+        except: pass
 
 async def search_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = " ".join(context.args)
@@ -243,8 +247,8 @@ async def search_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += f"{index}. *{title[:50]}* [{duration}]\n\n"
             keyboard.append([InlineKeyboardButton(f"🎬 {index}. Download Link", callback_data=f"yt_{video_id[:40]}")])
         await msg.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-    except:
-        await msg.edit_text("Baby, search mein dikkat aayi! 💔")
+    except Exception as e:
+        await msg.edit_text(f"Baby, search error: {e}")
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -263,8 +267,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.edit_text(f"✅ *Link Taiyar Hai!*\n\n🎵 *Title:* {fetch_data.get('title', 'Video')}\n👇", reply_markup=dl_markup, parse_mode='Markdown')
             return
         await query.message.edit_text("Baby, download fail ho gaya! 💔")
-    except:
-        await query.message.edit_text("Baby, link fetch karne mein error aayi! 💔")
+    except Exception as e:
+        await query.message.edit_text(f"Baby, error: {e}")
 
 async def voice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     unique_id = uuid.uuid4().hex
@@ -285,7 +289,7 @@ async def voice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_voice(voice=voice_file)
     except Exception as e:
         logging.error(f"Voice Command Error: {e}")
-        await update.message.reply_text("Voice generate nahi ho payi, sorry baby!")
+        await update.message.reply_text(f"Voice error: {e}")
     finally:
         if os.path.exists(mp3_path):
             try: os.remove(mp3_path)
@@ -300,7 +304,7 @@ async def get_ai_response(user_id, user_text):
     system_prompt = (
         f"You are Fenix, a human boyfriend chatting on Instagram/WhatsApp. {mode}. Memory: {memories}\n\n"
         "CRITICAL RULES FOR TEXTING:\n"
-        "1. Write EXTREMELY short replies like real humans text on chat. Keep it strictly 1 to 2 lines max, or sometimes just 1-2 words (e.g. 'Haan', 'Sahi hai', 'Batao na', 'Okk', 'Pata hai').\n"
+        "1. Write EXTREMELY short replies like real humans text on chat. Line max 1-2.\n"
         "2. Speak ONLY in casual, natural Hinglish (Roman Hindi script, lowercase style).\n"
         "3. NEVER write long paragraphs or robot-like explanations.\n"
         "4. NO stage directions, actions, or feelings in asterisks/brackets."
@@ -324,15 +328,36 @@ async def handle_message(update: Update, update_context: ContextTypes.DEFAULT_TY
     reply = humanize_text(cleaned)
     await update.message.reply_text(reply)
 
+# --- TELEGRAM WEBHOOK ROUTE IN FLASK ---
+@app.route('/telegram_webhook', methods=['POST'])
+def telegram_webhook():
+    if telegram_app:
+        async def process_update():
+            update = Update.de_json(request.get_json(force=True), telegram_app.bot)
+            await telegram_app.process_update(update)
+        asyncio.run(process_update())
+    return "OK", 200
+
+def init_telegram_bot():
+    global telegram_app
+    telegram_app = Application.builder().token(os.environ.get("TELEGRAM_TOKEN")).post_init(post_init).build()
+    telegram_app.add_handler(CommandHandler("search", search_youtube)) 
+    telegram_app.add_handler(CommandHandler("voice", voice_command))
+    telegram_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+    telegram_app.add_handler(CallbackQueryHandler(button_callback))
+    telegram_app.add_error_handler(error_handler)
+    
+    # Auto-set Telegram Webhook using Render URL
+    # Replace 'my-youtube-api-1uf5.onrender.com' with your actual Render URL or set WEBHOOK_URL env
+    render_domain = os.environ.get("RENDER_EXTERNAL_URL")
+    if render_domain:
+        webhook_url = f"{render_domain}/telegram_webhook"
+        asyncio.get_event_loop().run_until_complete(telegram_app.bot.set_webhook(webhook_url))
+        logging.info(f"Telegram Webhook set to: {webhook_url}")
+
 if __name__ == '__main__':
     init_db()
-    threading.Thread(target=run_flask, daemon=True).start()
-    app_bot = ApplicationBuilder().token(os.environ.get("TELEGRAM_TOKEN")).post_init(post_init).build()
-    app_bot.add_handler(CommandHandler("search", search_youtube)) 
-    app_bot.add_handler(CommandHandler("voice", voice_command))
-    app_bot.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-    app_bot.add_handler(CallbackQueryHandler(button_callback))
-    app_bot.add_error_handler(error_handler)
-    print("Fenix is running smoothly with Turso Cloud Database!")
-    app_bot.run_polling()
-                    
+    init_telegram_bot()
+    print("Fenix Unified Webhook Server is running!")
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
+            
