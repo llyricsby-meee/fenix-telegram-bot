@@ -915,16 +915,14 @@ def process_instagram_message(
 # ============================================================
 
 def run_flask():
-
     try:
-
         app.run(
             host="0.0.0.0",
             port=PORT,
             threaded=True,
         )
-
     except Exception as e:
-
-        logger.exception("Unhandled exception")
+        logger.exception(
             "Flask server error: %s",
+            e,
+        )
