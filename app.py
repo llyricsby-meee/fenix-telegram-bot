@@ -926,5 +926,5 @@ def run_flask():
 
     except Exception as e:
 
-        logger.exception(
+        logger.exception("Unhandled exception")
             "Flask server error: %s",
